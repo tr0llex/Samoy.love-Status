@@ -308,6 +308,21 @@ await writeJson(join(DATA, 'summary.json'), {
   incidents: incidents.slice(0, 10),
 });
 
+// Бот молчит, пока всё работает: сообщения уходят ТОЛЬКО на смену состояния.
+// Иначе он писал бы каждые 5 минут. Чтобы убедиться, что канал жив, запустите
+// probe вручную с галкой notify_test — придёт сводка текущего состояния.
+if (process.env.NOTIFY_TEST === 'true') {
+  const lines = projects.map((p) => {
+    const icon = p.status === 'up' ? '🟢' : p.status === 'down' ? '🔴' : '🟡';
+    return `${icon} <b>${p.title}</b> — ${p.up}/${p.total}`;
+  });
+  messages.push(
+    `📊 <b>Текущий статус</b>\n\n${lines.join('\n')}\n\n` +
+      `Проверок: ${summaryServices.length}, недоступно: ${down}\n` +
+      `https://status.samoy.love`,
+  );
+}
+
 for (const m of messages) await notify(m);
 
 console.log(
