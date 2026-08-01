@@ -109,15 +109,12 @@ const DATA_URL =
 
   function checkRow(s) {
     return `
-      <article class="row ${s.status}${s.primary ? ' primary' : ''}">
+      <article class="row ${s.status}">
         <div class="row-head">
           <div class="ident">
             <span class="state-dot" aria-hidden="true"></span>
             <div>
-              <p class="name">
-                <a href="${s.url}" rel="noopener">${s.name}</a>
-                ${s.primary ? '<span class="key" title="Ключевая проверка проекта">ключевая</span>' : ''}
-              </p>
+              <p class="name"><a href="${s.url}" rel="noopener">${s.name}</a></p>
               <p class="note">${s.note || ''}</p>
             </div>
           </div>
@@ -280,20 +277,7 @@ const DATA_URL =
     background: var(--bg-raise);
     padding: 0.85rem 1rem;
   }
-  :global(.row.primary) { border-color: color-mix(in oklch, var(--p-accent) 30%, var(--line)); }
   :global(.row.down) { border-color: color-mix(in oklch, var(--down) 45%, transparent); }
-  :global(.key) {
-    font-family: var(--font-mono);
-    font-size: 0.62rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--p-accent);
-    border: 1px solid color-mix(in oklch, var(--p-accent) 40%, transparent);
-    border-radius: 999px;
-    padding: 0.1em 0.5em;
-    margin-left: 0.5em;
-    vertical-align: 0.1em;
-  }
 
   :global(.row-head) {
     display: flex;
