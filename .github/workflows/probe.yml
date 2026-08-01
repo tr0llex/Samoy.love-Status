@@ -1,0 +1,65 @@
+name: probe
+
+# Обход сервисов каждые 5 минут — минимальный интервал cron у GitHub Actions.
+# Репозиторий публичный, поэтому минуты не тратятся из лимита.
+#
+# Важно: проверки идут ИЗ GitHub, а не с сервера samoy.love. Если хост лежит,
+# этот workflow продолжает работать и зафиксирует падение — ради этого всё и затевалось.
+#
+# Секреты (Settings → Secrets and variables → Actions):
+#   TELEGRAM_BOT_TOKEN  — токен бота от @BotFather
+#   TELEGRAM_CHAT_ID    — куда слать (свой id можно узнать у @userinfobot)
+# Без них пробер работает молча, только пишет данные.
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+# Две одновременные проверки подрались бы за push в data/.
+concurrency:
+  group: probe
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Обойти сервисы
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: node scripts/probe.mjs
+
+      - name: Сохранить результат
+        run: |
+          git config user.name  'status-probe'
+          git config user.email 'status-probe@users.noreply.github.com'
+          git add data
+          # Данные не изменились — коммитить нечего (бывает при полном совпадении
+          # агрегатов), это нормальный исход, а не ошибка.
+          if git diff --cached --quiet; then
+            echo 'изменений нет'
+            exit 0
+          fi
+          git commit -m "probe: $(date -u '+%Y-%m-%d %H:%M UTC')"
+          # Между проверкой и push могли лечь чужие коммиты (например, правка
+          # кода). Три попытки с rebase вместо падения всего запуска.
+          for i in 1 2 3; do
+            if git pull --rebase --autostash origin main && git push; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo '::error::не удалось запушить данные проверок'
+          exit 1

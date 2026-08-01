@@ -1,0 +1,64 @@
+name: deploy
+
+# Публикация страницы на GitHub Pages.
+#
+# paths-ignore на data/** принципиален: пробер коммитит туда каждые 5 минут,
+# и без этого фильтра Pages пересобирались бы 288 раз в сутки. Свежие данные
+# страница берёт напрямую с raw.githubusercontent во время работы, поэтому
+# передеплой ради них не нужен — только ради изменений кода.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'data/**'
+      - 'README.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Проверить, что страница жива
+        run: |
+          for i in $(seq 1 10); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 https://status.samoy.love/ || true)
+            echo "попытка $i: HTTP $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 6
+          done
+          echo '::error::status.samoy.love не отвечает 200 после публикации'
+          exit 1
