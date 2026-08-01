@@ -1,12 +1,9 @@
 ---
 import Layout from '../layouts/Layout.astro';
 
-// Откуда страница берёт данные. Файл лежит в этом же репозитории и обновляется
-// пробером каждые 5 минут; страница читает его напрямую с raw.githubusercontent,
-// поэтому свежие данные не требуют пересборки и передеплоя Pages.
-const DATA_URL =
-  import.meta.env.PUBLIC_DATA_URL ??
-  'https://raw.githubusercontent.com/tr0llex/Samoy.love-Status/main/data/summary.json';
+// Данные пишет агент на том же сервере (agent/), раз в минуту, рядом со
+// страницей — поэтому путь относительный и без задержек CDN.
+const DATA_URL = import.meta.env.PUBLIC_DATA_URL ?? '/data/summary.json';
 ---
 
 <Layout
@@ -18,8 +15,9 @@ const DATA_URL =
       <p class="mono kicker">~/status</p>
       <h1>Статус сервисов</h1>
       <p class="sub">
-        Проверки каждые 5 минут из GitHub Actions — снаружи инфраструктуры samoy.love.
-        Если сервер недоступен, эта страница продолжает работать и покажет сбой.
+        Проверки раз в минуту. Страница живёт на том же сервере, что и сервисы, —
+        если он недоступен, она тоже не откроется; на этот случай отдельная внешняя
+        проверка сообщает о недоступности в Telegram.
       </p>
     </header>
 
@@ -56,6 +54,15 @@ const DATA_URL =
     const h = Math.floor(min / 60);
     if (h < 24) return `${h} ч назад`;
     return `${Math.floor(h / 24)} дн назад`;
+  }
+
+  function fmtDate(iso) {
+    const d = new Date(iso);
+    const today = new Date();
+    const sameDay = d.toDateString() === today.toDateString();
+    const time = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    if (sameDay) return `сегодня ${time}`;
+    return `${d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })} ${time}`;
   }
 
   function duration(ms) {
@@ -156,7 +163,37 @@ const DATA_URL =
           </div>
         </header>
         <div class="p-body">${p.checks.map(checkRow).join('')}</div>
+        ${infoStrip(p)}
       </section>`;
+  }
+
+  // Нижняя полоса карточки: службы и что именно сейчас выкачено.
+  // Показываем только то, что не стыдно показать снаружи: состояние службы,
+  // версию и дату сборки. Диск, память и счётчики рестартов — не сюда.
+  function infoStrip(p) {
+    const units = (p.units || []).map((u) => {
+      const cls = u.active ? 'up' : 'down';
+      const since = u.since ? ` · с ${fmtDate(u.since)}` : '';
+      return `<li class="info-item">
+        <span class="state-dot ${cls}" aria-hidden="true"></span>
+        <span class="i-title">${u.title || u.name}</span>
+        <span class="mono i-val">${u.active ? 'работает' : u.state || 'остановлена'}${since}</span>
+      </li>`;
+    });
+
+    const builds = (p.builds || []).map(
+      (b) => `<li class="info-item">
+        <span class="i-title">${b.title}</span>
+        <span class="mono i-val">${b.version ? `<b>${b.version}</b> · ` : ''}${b.at ? fmtDate(b.at) : '—'}</span>
+      </li>`,
+    );
+
+    if (!units.length && !builds.length) return '';
+    return `
+      <div class="info">
+        ${units.length ? `<div class="info-col"><p class="mono info-h">службы</p><ul role="list">${units.join('')}</ul></div>` : ''}
+        ${builds.length ? `<div class="info-col"><p class="mono info-h">выкачено</p><ul role="list">${builds.join('')}</ul></div>` : ''}
+      </div>`;
   }
 
   function render(data) {
@@ -269,6 +306,38 @@ const DATA_URL =
   :global(.p-meta) { display: flex; align-items: center; gap: 0.6rem; }
   :global(.p-count) { color: var(--text-dim); font-size: 0.78rem; }
   :global(.p-body) { padding: 0.8rem; display: grid; gap: 0.6rem; }
+
+  /* ---------- службы и выкатки ---------- */
+  :global(.info) {
+    display: grid;
+    gap: 0.9rem 2rem;
+    padding: 0.85rem 1.2rem 1rem;
+    border-top: 1px solid var(--line);
+    background: color-mix(in oklch, var(--bg) 45%, transparent);
+  }
+  @media (min-width: 620px) {
+    :global(.info) { grid-template-columns: 1fr 1fr; }
+  }
+  :global(.info-h) {
+    color: var(--text-dim);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    margin: 0 0 0.4rem;
+  }
+  :global(.info ul) { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; }
+  :global(.info-item) {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    font-size: 0.82rem;
+  }
+  :global(.info-item .state-dot) { align-self: center; }
+  :global(.state-dot.up) { background: var(--up); box-shadow: 0 0 8px var(--up); }
+  :global(.state-dot.down) { background: var(--down); box-shadow: 0 0 8px var(--down); }
+  :global(.i-title) { color: var(--text); }
+  :global(.i-val) { margin-left: auto; color: var(--text-dim); font-size: 0.72rem; text-align: right; }
+  :global(.i-val b) { color: var(--p-accent); font-weight: 600; }
 
   /* ---------- строка проверки ---------- */
   :global(.row) {
