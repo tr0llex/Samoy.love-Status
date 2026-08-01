@@ -182,8 +182,14 @@ const config = JSON.parse(await readFile(join(ROOT, 'config/services.json'), 'ut
 const state = await readJson(join(DATA, 'state.json'), { services: {} });
 const incidents = await readJson(join(DATA, 'incidents.json'), []);
 
+// Проверки живут внутри проектов, но обходим их плоским списком: у каждой свой
+// id, и история привязана именно к нему, а не к месту в дереве.
+const flat = config.projects.flatMap((p) =>
+  p.checks.map((c) => ({ ...c, project: p, fullName: `${p.title} · ${c.name}` })),
+);
+
 const results = await Promise.all(
-  config.services.map(async (s) => {
+  flat.map(async (s) => {
     const http = await checkHttp(s);
     const certDays = s.cert ? await checkCert(s.cert) : null;
     return { service: s, ...http, certDays };
@@ -221,29 +227,29 @@ for (const r of results) {
     if (status === 'down') {
       incidents.unshift({
         service: s.id,
-        name: s.name,
+        name: s.fullName,
         start: since,
         end: null,
         reason: r.error ?? 'недоступен',
       });
-      messages.push(`🔴 <b>${s.name}</b> недоступен\n${r.error ?? ''}\n${s.url}`);
+      messages.push(`🔴 <b>${s.fullName}</b> недоступен\n${r.error ?? ''}\n${s.url}`);
     } else {
       const open = incidents.find((i) => i.service === s.id && !i.end);
       if (open) {
         open.end = since;
         open.durationMs = Date.parse(since) - Date.parse(open.start);
         messages.push(
-          `🟢 <b>${s.name}</b> снова работает\nПростой: ${humanDuration(open.durationMs)}`,
+          `🟢 <b>${s.fullName}</b> снова работает\nПростой: ${humanDuration(open.durationMs)}`,
         );
       } else {
-        messages.push(`🟢 <b>${s.name}</b> снова работает`);
+        messages.push(`🟢 <b>${s.fullName}</b> снова работает`);
       }
     }
   }
 
   // --- предупреждение о сертификате (один раз при пересечении порога)
   if (r.certDays !== null && r.certDays <= 14 && (prev?.certDays ?? 99) > 14) {
-    messages.push(`⚠️ <b>${s.name}</b>: сертификат истекает через ${r.certDays} дн.`);
+    messages.push(`⚠️ <b>${s.fullName}</b>: сертификат истекает через ${r.certDays} дн.`);
   }
 
   state.services[s.id] = { status, since, ms: r.ms, code: r.code, certDays: r.certDays };
@@ -252,7 +258,8 @@ for (const r of results) {
     id: s.id,
     name: s.name,
     note: s.note ?? '',
-    group: s.group,
+    project: s.project.id,
+    primary: !!s.primary,
     url: s.url,
     status,
     since,
@@ -273,14 +280,31 @@ for (const r of results) {
 const down = summaryServices.filter((s) => s.status === 'down').length;
 const overall = down === 0 ? 'operational' : down === summaryServices.length ? 'down' : 'degraded';
 
+// Проекты идут в том же порядке, что и в конфиге, — это и есть сортировка
+// по важности. Статус проекта = худший among его проверок.
+const projects = config.projects.map((p) => {
+  const checks = summaryServices.filter((s) => s.project === p.id);
+  const up = checks.filter((c) => c.status === 'up').length;
+  return {
+    id: p.id,
+    title: p.title,
+    subtitle: p.subtitle ?? '',
+    url: p.url,
+    accent: p.accent ?? null,
+    status: up === checks.length ? 'up' : up === 0 ? 'down' : 'degraded',
+    up,
+    total: checks.length,
+    checks,
+  };
+});
+
 state.updated = new Date(now).toISOString();
 await writeJson(join(DATA, 'state.json'), state);
 await writeJson(join(DATA, 'incidents.json'), incidents.slice(0, INCIDENTS_KEEP));
 await writeJson(join(DATA, 'summary.json'), {
   updated: state.updated,
   overall,
-  groups: config.groups,
-  services: summaryServices,
+  projects,
   incidents: incidents.slice(0, 10),
 });
 
@@ -289,11 +313,14 @@ for (const m of messages) await notify(m);
 console.log(
   `[probe] ${new Date(now).toISOString()} — ${summaryServices.length - down}/${summaryServices.length} up, состояние: ${overall}`,
 );
-for (const s of summaryServices) {
-  console.log(
-    `  ${s.status === 'up' ? '✓' : '✗'} ${s.name.padEnd(28)} ${String(s.code).padStart(3)} ${String(s.ms).padStart(5)}ms` +
-      (s.certDays !== null ? `  сертификат: ${s.certDays} дн.` : ''),
-  );
+for (const p of projects) {
+  console.log(`  ${p.title} — ${p.up}/${p.total}`);
+  for (const s of p.checks) {
+    console.log(
+      `    ${s.status === 'up' ? '✓' : '✗'} ${s.name.padEnd(20)} ${String(s.code).padStart(3)} ${String(s.ms).padStart(5)}ms` +
+        (s.certDays !== null ? `  сертификат: ${s.certDays} дн.` : ''),
+    );
+  }
 }
 
 // Ненулевой код выхода не нужен: падение сервиса — это нормальный результат
