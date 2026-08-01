@@ -1,76 +1,101 @@
 {
-  "groups": [
-    { "id": "sites", "title": "Сайты" },
-    { "id": "services", "title": "Сервисы и API" }
-  ],
-  "services": [
+  "//": "Порядок проектов = порядок на странице. Сортировка по важности: сверху то, чей простой заметнее. Чтобы переставить — поменяйте местами объекты в массиве.",
+  "projects": [
     {
       "id": "samoy",
-      "name": "samoy.love",
-      "note": "Личная страница",
-      "group": "sites",
-      "url": "https://samoy.love/",
-      "expect": 200,
-      "cert": "samoy.love"
-    },
-    {
-      "id": "metro",
-      "name": "metro.samoy.love",
-      "note": "Схема метро, офлайн-PWA",
-      "group": "sites",
-      "url": "https://metro.samoy.love/",
-      "expect": 200,
-      "cert": "metro.samoy.love"
+      "title": "samoy.love",
+      "subtitle": "Личная страница и витрина проектов",
+      "url": "https://samoy.love",
+      "accent": "oklch(0.78 0.16 195)",
+      "checks": [
+        {
+          "id": "samoy",
+          "name": "Сайт",
+          "url": "https://samoy.love/",
+          "expect": 200,
+          "cert": "samoy.love",
+          "primary": true
+        }
+      ]
     },
     {
       "id": "launcher",
-      "name": "launcher.samoy.love",
-      "note": "Сайт лаунчера ChillHub",
-      "group": "sites",
-      "url": "https://launcher.samoy.love/",
-      "expect": 200,
-      "cert": "launcher.samoy.love"
+      "title": "ChillHub",
+      "subtitle": "Лаунчер игр: сайт, раздача сборок и админка",
+      "url": "https://launcher.samoy.love",
+      "accent": "oklch(0.75 0.15 55)",
+      "checks": [
+        {
+          "id": "launcher",
+          "name": "Сайт",
+          "url": "https://launcher.samoy.love/",
+          "expect": 200,
+          "cert": "launcher.samoy.love",
+          "primary": true
+        },
+        {
+          "id": "launcher-api",
+          "name": "API манифестов",
+          "note": "Через него лаунчер узнаёт о новых версиях",
+          "url": "https://launcher.samoy.love/manifests/launcher/latest.json",
+          "expect": 200
+        },
+        {
+          "id": "launcher-admin",
+          "name": "API админки",
+          "note": "Публикация сборок и новостей",
+          "url": "https://launcher.samoy.love/admin/api/health",
+          "expect": 200
+        }
+      ]
     },
     {
       "id": "snakes",
-      "name": "snakes.samoy.love",
-      "note": "Клиент игры",
-      "group": "sites",
-      "url": "https://snakes.samoy.love/",
-      "expect": 200,
-      "cert": "snakes.samoy.love"
+      "title": "Snakes",
+      "subtitle": "Мультиплеерный захват территории",
+      "url": "https://snakes.samoy.love",
+      "accent": "oklch(0.85 0.2 130)",
+      "checks": [
+        {
+          "id": "snakes-health",
+          "name": "Игровой сервер",
+          "note": "Без него матчи не идут",
+          "url": "https://snakes.samoy.love/healthz",
+          "expect": 200,
+          "primary": true
+        },
+        {
+          "id": "snakes",
+          "name": "Клиент",
+          "url": "https://snakes.samoy.love/",
+          "expect": 200,
+          "cert": "snakes.samoy.love"
+        }
+      ]
     },
     {
-      "id": "snakes-health",
-      "name": "Snakes · игровой сервер",
-      "note": "Go + WebSocket, /healthz",
-      "group": "services",
-      "url": "https://snakes.samoy.love/healthz",
-      "expect": 200
-    },
-    {
-      "id": "launcher-admin",
-      "name": "Лаунчер · API админки",
-      "note": "/admin/api/health",
-      "group": "services",
-      "url": "https://launcher.samoy.love/admin/api/health",
-      "expect": 200
-    },
-    {
-      "id": "launcher-api",
-      "name": "Лаунчер · публичное API",
-      "note": "Манифест последней версии",
-      "group": "services",
-      "url": "https://launcher.samoy.love/manifests/launcher/latest.json",
-      "expect": 200
-    },
-    {
-      "id": "metro-sw",
-      "name": "Metro · service worker",
-      "note": "Офлайн-режим PWA",
-      "group": "services",
-      "url": "https://metro.samoy.love/kitty-metro-sw.js",
-      "expect": 200
+      "id": "metro",
+      "title": "Hello Kitty Метро",
+      "subtitle": "Офлайн-PWA со схемой московского метро",
+      "url": "https://metro.samoy.love",
+      "accent": "oklch(0.78 0.17 350)",
+      "checks": [
+        {
+          "id": "metro",
+          "name": "Сайт",
+          "url": "https://metro.samoy.love/",
+          "expect": 200,
+          "cert": "metro.samoy.love",
+          "primary": true
+        },
+        {
+          "id": "metro-sw",
+          "name": "Service worker",
+          "note": "Отвечает за офлайн-режим",
+          "url": "https://metro.samoy.love/kitty-metro-sw.js",
+          "expect": 200
+        }
+      ]
     }
   ]
 }
