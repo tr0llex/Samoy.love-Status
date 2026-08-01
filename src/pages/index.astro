@@ -107,14 +107,17 @@ const DATA_URL =
     return `<span class="cert ${cls}" title="Срок действия TLS-сертификата">TLS ${days} дн.</span>`;
   }
 
-  function serviceRow(s) {
+  function checkRow(s) {
     return `
-      <article class="row ${s.status}">
+      <article class="row ${s.status}${s.primary ? ' primary' : ''}">
         <div class="row-head">
           <div class="ident">
             <span class="state-dot" aria-hidden="true"></span>
             <div>
-              <p class="name"><a href="${s.url}" rel="noopener">${s.name}</a></p>
+              <p class="name">
+                <a href="${s.url}" rel="noopener">${s.name}</a>
+                ${s.primary ? '<span class="key" title="Ключевая проверка проекта">ключевая</span>' : ''}
+              </p>
               <p class="note">${s.note || ''}</p>
             </div>
           </div>
@@ -138,6 +141,27 @@ const DATA_URL =
       </article>`;
   }
 
+  function projectCard(p) {
+    const label =
+      p.status === 'up' ? 'всё работает' : p.status === 'down' ? 'не работает' : 'частичный сбой';
+    return `
+      <section class="project ${p.status}" style="--p-accent: ${p.accent || 'var(--accent)'}">
+        <header class="p-head">
+          <div>
+            <h2 class="p-title">
+              <a href="${p.url}" rel="noopener">${p.title}</a>
+            </h2>
+            <p class="p-sub">${p.subtitle}</p>
+          </div>
+          <div class="p-meta">
+            <span class="mono p-count">${p.up}/${p.total}</span>
+            <span class="badge ${p.status === 'up' ? 'up' : p.status === 'down' ? 'down' : 'partial'}">${label}</span>
+          </div>
+        </header>
+        <div class="p-body">${p.checks.map(checkRow).join('')}</div>
+      </section>`;
+  }
+
   function render(data) {
     const banner = $('banner');
     const map = { operational: 'up', degraded: 'partial', down: 'down' };
@@ -150,16 +174,7 @@ const DATA_URL =
           : 'Массовый сбой';
     $('updated').textContent = `проверено ${relTime(data.updated)}`;
 
-    $('content').innerHTML = data.groups
-      .map((g) => {
-        const items = data.services.filter((s) => s.group === g.id);
-        if (!items.length) return '';
-        return `<section class="block">
-          <h2>${g.title}</h2>
-          ${items.map(serviceRow).join('')}
-        </section>`;
-      })
-      .join('');
+    $('content').innerHTML = data.projects.map(projectCard).join('');
 
     const list = data.incidents || [];
     if (list.length) {
@@ -227,25 +242,58 @@ const DATA_URL =
   .banner.down .dot { background: var(--down); box-shadow: 0 0 12px var(--down); }
   .updated { margin-left: auto; color: var(--text-dim); font-size: 0.75rem; font-weight: 400; }
 
-  /* ---------- блоки и строки сервисов ---------- */
-  .block { margin-bottom: 2rem; }
-  .block h2 {
-    font-size: 0.8rem;
-    text-transform: uppercase;
-    letter-spacing: 0.09em;
-    color: var(--text-dim);
-    margin-bottom: 0.8rem;
-    font-family: var(--font-mono);
+  /* ---------- карточка проекта ---------- */
+  :global(.project) {
+    border: 1px solid var(--line);
+    border-radius: calc(var(--radius) + 6px);
+    background:
+      radial-gradient(36rem 14rem at 100% 0%, color-mix(in oklch, var(--p-accent) 8%, transparent), transparent 65%),
+      color-mix(in oklch, var(--bg-raise) 55%, transparent);
+    margin-bottom: 1.1rem;
+    overflow: clip;
   }
+  :global(.project.degraded) { border-color: color-mix(in oklch, var(--partial) 40%, transparent); }
+  :global(.project.down) { border-color: color-mix(in oklch, var(--down) 45%, transparent); }
 
+  :global(.p-head) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    padding: 1rem 1.2rem;
+    border-bottom: 1px solid var(--line);
+    border-left: 3px solid var(--p-accent);
+  }
+  :global(.p-title) { font-size: 1.15rem; font-weight: 750; margin: 0; }
+  :global(.p-title a) { color: var(--text); }
+  :global(.p-title a:hover) { color: var(--p-accent); }
+  :global(.p-sub) { margin: 0.15rem 0 0; color: var(--text-dim); font-size: 0.83rem; }
+  :global(.p-meta) { display: flex; align-items: center; gap: 0.6rem; }
+  :global(.p-count) { color: var(--text-dim); font-size: 0.78rem; }
+  :global(.p-body) { padding: 0.8rem; display: grid; gap: 0.6rem; }
+
+  /* ---------- строка проверки ---------- */
   :global(.row) {
     border: 1px solid var(--line);
     border-radius: var(--radius);
     background: var(--bg-raise);
-    padding: 1rem 1.1rem;
+    padding: 0.85rem 1rem;
   }
-  :global(.row + .row) { margin-top: 0.7rem; }
+  :global(.row.primary) { border-color: color-mix(in oklch, var(--p-accent) 30%, var(--line)); }
   :global(.row.down) { border-color: color-mix(in oklch, var(--down) 45%, transparent); }
+  :global(.key) {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--p-accent);
+    border: 1px solid color-mix(in oklch, var(--p-accent) 40%, transparent);
+    border-radius: 999px;
+    padding: 0.1em 0.5em;
+    margin-left: 0.5em;
+    vertical-align: 0.1em;
+  }
 
   :global(.row-head) {
     display: flex;
@@ -264,6 +312,7 @@ const DATA_URL =
   }
   :global(.row.up .state-dot) { background: var(--up); box-shadow: 0 0 10px var(--up); }
   :global(.row.down .state-dot) { background: var(--down); box-shadow: 0 0 10px var(--down); }
+  :global(.bar.up) { background: color-mix(in oklch, var(--up) 85%, var(--p-accent)); }
 
   :global(.name) { margin: 0; font-weight: 650; font-size: 0.98rem; }
   :global(.name a) { color: var(--text); }
@@ -288,6 +337,11 @@ const DATA_URL =
     color: var(--down);
     border-color: color-mix(in oklch, var(--down) 50%, transparent);
     background: color-mix(in oklch, var(--down) 12%, transparent);
+  }
+  :global(.badge.partial) {
+    color: var(--partial);
+    border-color: color-mix(in oklch, var(--partial) 45%, transparent);
+    background: color-mix(in oklch, var(--partial) 12%, transparent);
   }
   :global(.cert) {
     font-size: 0.7rem;
