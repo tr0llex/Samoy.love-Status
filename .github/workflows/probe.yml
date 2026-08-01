@@ -15,6 +15,11 @@ on:
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
+    inputs:
+      notify_test:
+        description: 'Прислать текущий статус в Telegram (проверка канала)'
+        type: boolean
+        default: false
 
 # Две одновременные проверки подрались бы за push в data/.
 concurrency:
@@ -39,6 +44,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NOTIFY_TEST: ${{ inputs.notify_test }}
         run: node scripts/probe.mjs
 
       - name: Сохранить результат
