@@ -1,5 +1,5 @@
 {
-  "//": "Порядок проектов = порядок на странице. Сортировка по важности: сверху то, чей простой заметнее. Чтобы переставить — поменяйте местами объекты в массиве.",
+  "//": "Единый конфиг: его читают и серверный агент (agent/), и внешний пробер в GitHub Actions (scripts/probe.mjs). Порядок проектов = порядок на странице.",
   "projects": [
     {
       "id": "samoy",
@@ -13,10 +13,10 @@
           "name": "Сайт",
           "url": "https://samoy.love/",
           "expect": 200,
-          "cert": "samoy.love",
-          "primary": true
+          "cert": "samoy.love"
         }
-      ]
+      ],
+      "builds": [{ "title": "Сайт", "type": "file", "path": "/var/www/samoy.love/index.html" }]
     },
     {
       "id": "launcher",
@@ -30,8 +30,7 @@
           "name": "Сайт",
           "url": "https://launcher.samoy.love/",
           "expect": 200,
-          "cert": "launcher.samoy.love",
-          "primary": true
+          "cert": "launcher.samoy.love"
         },
         {
           "id": "launcher-api",
@@ -47,6 +46,15 @@
           "url": "https://launcher.samoy.love/admin/api/health",
           "expect": 200
         }
+      ],
+      "units": [
+        { "name": "chillhub-api.service", "title": "Публичный API" },
+        { "name": "chillhub-admin.service", "title": "Админка" }
+      ],
+      "builds": [
+        { "title": "Сайт", "type": "file", "path": "/var/www/site/index.html" },
+        { "title": "Публичный API", "type": "file", "path": "/opt/chillhub/api" },
+        { "title": "Админка", "type": "file", "path": "/opt/chillhub/admin" }
       ]
     },
     {
@@ -61,8 +69,7 @@
           "name": "Игровой сервер",
           "note": "Без него матчи не идут",
           "url": "https://snakes.samoy.love/healthz",
-          "expect": 200,
-          "primary": true
+          "expect": 200
         },
         {
           "id": "snakes",
@@ -71,7 +78,9 @@
           "expect": 200,
           "cert": "snakes.samoy.love"
         }
-      ]
+      ],
+      "units": [{ "name": "snakes.service", "title": "Игровой сервер" }],
+      "builds": [{ "title": "Сервер и клиент", "type": "release", "path": "/opt/snakes/current" }]
     },
     {
       "id": "metro",
@@ -85,8 +94,7 @@
           "name": "Сайт",
           "url": "https://metro.samoy.love/",
           "expect": 200,
-          "cert": "metro.samoy.love",
-          "primary": true
+          "cert": "metro.samoy.love"
         },
         {
           "id": "metro-sw",
@@ -95,7 +103,8 @@
           "url": "https://metro.samoy.love/kitty-metro-sw.js",
           "expect": 200
         }
-      ]
+      ],
+      "builds": [{ "title": "Сайт", "type": "file", "path": "/var/www/metro/index.html" }]
     }
   ]
 }

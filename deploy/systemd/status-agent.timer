@@ -1,0 +1,12 @@
+[Unit]
+Description=Запуск агента статус-страницы раз в минуту
+
+[Timer]
+# Первый запуск — почти сразу после загрузки, дальше каждую минуту.
+OnBootSec=30s
+OnUnitActiveSec=1min
+AccuracySec=5s
+Unit=status-agent.service
+
+[Install]
+WantedBy=timers.target
