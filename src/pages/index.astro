@@ -1,0 +1,369 @@
+---
+import Layout from '../layouts/Layout.astro';
+
+// Откуда страница берёт данные. Файл лежит в этом же репозитории и обновляется
+// пробером каждые 5 минут; страница читает его напрямую с raw.githubusercontent,
+// поэтому свежие данные не требуют пересборки и передеплоя Pages.
+const DATA_URL =
+  import.meta.env.PUBLIC_DATA_URL ??
+  'https://raw.githubusercontent.com/tr0llex/samoy-status/main/data/summary.json';
+---
+
+<Layout
+  title="Статус сервисов — samoy.love"
+  description="Доступность сайтов и сервисов samoy.love: текущий статус, аптайм за 90 дней, история инцидентов."
+>
+  <main class="container">
+    <header class="head">
+      <p class="mono kicker">~/status</p>
+      <h1>Статус сервисов</h1>
+      <p class="sub">
+        Проверки каждые 5 минут из GitHub Actions — снаружи инфраструктуры samoy.love.
+        Если сервер недоступен, эта страница продолжает работать и покажет сбой.
+      </p>
+    </header>
+
+    <section id="banner" class="banner loading" aria-live="polite">
+      <span class="dot" aria-hidden="true"></span>
+      <span id="banner-text">Загружаю данные…</span>
+      <span class="mono updated" id="updated"></span>
+    </section>
+
+    <div id="content"></div>
+
+    <section id="incidents-block" class="block" hidden>
+      <h2>Инциденты</h2>
+      <ul class="incidents" id="incidents" role="list"></ul>
+    </section>
+
+    <footer class="foot mono">
+      <a href="https://samoy.love">← samoy.love</a>
+      <span>обновление каждые 5 минут · история за 90 дней</span>
+    </footer>
+  </main>
+</Layout>
+
+<script define:vars={{ DATA_URL }}>
+  const $ = (id) => document.getElementById(id);
+  const fmtMs = (ms) => (ms == null ? '—' : `${ms} мс`);
+  const fmtPct = (v) => (v == null ? '—' : `${v.toFixed(2).replace(/\.?0+$/, '')}%`);
+
+  function relTime(iso) {
+    const diff = Date.now() - Date.parse(iso);
+    const min = Math.round(diff / 60000);
+    if (min < 1) return 'только что';
+    if (min < 60) return `${min} мин назад`;
+    const h = Math.floor(min / 60);
+    if (h < 24) return `${h} ч назад`;
+    return `${Math.floor(h / 24)} дн назад`;
+  }
+
+  function duration(ms) {
+    const min = Math.round(ms / 60000);
+    if (min < 60) return `${min} мин`;
+    const h = Math.floor(min / 60);
+    return `${h} ч ${min % 60} мин`;
+  }
+
+  // Полоска дня: зелёная при 100%, жёлтая при частичных сбоях, красная при полном.
+  function dayClass(d) {
+    if (!d || !d.total) return 'none';
+    const ratio = d.up / d.total;
+    if (ratio === 1) return 'up';
+    if (ratio === 0) return 'down';
+    return 'partial';
+  }
+
+  function bars(days) {
+    // Всегда 90 ячеек: недостающие слева — «нет данных», чтобы шкала не прыгала
+    // по мере накопления истории.
+    const pad = Array.from({ length: Math.max(0, 90 - days.length) }, () => null);
+    return [...pad, ...days]
+      .map((d) => {
+        const cls = dayClass(d);
+        const title = d
+          ? `${d.d}: ${fmtPct((d.up / d.total) * 100)} · ${d.avgMs} мс`
+          : 'нет данных';
+        return `<i class="bar ${cls}" title="${title}"></i>`;
+      })
+      .join('');
+  }
+
+  function sparkline(values) {
+    const pts = values.filter((v) => typeof v === 'number');
+    if (pts.length < 2) return '';
+    const max = Math.max(...pts, 1);
+    const step = 100 / (pts.length - 1);
+    const d = pts.map((v, i) => `${i * step},${28 - (v / max) * 24}`).join(' ');
+    return `<svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">
+      <polyline points="${d}" fill="none" stroke="currentColor" stroke-width="1.5"
+        vector-effect="non-scaling-stroke" stroke-linejoin="round" />
+    </svg>`;
+  }
+
+  function certBadge(days) {
+    if (days == null) return '';
+    const cls = days <= 7 ? 'down' : days <= 21 ? 'partial' : 'ok';
+    return `<span class="cert ${cls}" title="Срок действия TLS-сертификата">TLS ${days} дн.</span>`;
+  }
+
+  function serviceRow(s) {
+    return `
+      <article class="row ${s.status}">
+        <div class="row-head">
+          <div class="ident">
+            <span class="state-dot" aria-hidden="true"></span>
+            <div>
+              <p class="name"><a href="${s.url}" rel="noopener">${s.name}</a></p>
+              <p class="note">${s.note || ''}</p>
+            </div>
+          </div>
+          <div class="meta">
+            ${certBadge(s.certDays)}
+            <span class="mono latency" title="Время ответа при последней проверке">${fmtMs(s.ms)}</span>
+            <span class="badge ${s.status}">${s.status === 'up' ? 'работает' : 'недоступен'}</span>
+          </div>
+        </div>
+
+        <div class="bars" role="img" aria-label="Доступность по дням за 90 суток">${bars(s.days)}</div>
+
+        <div class="row-foot mono">
+          <span>24 ч: <b>${fmtPct(s.uptime.d1)}</b></span>
+          <span>7 дн: <b>${fmtPct(s.uptime.d7)}</b></span>
+          <span>90 дн: <b>${fmtPct(s.uptime.d90)}</b></span>
+          <span class="since">${s.status === 'up' ? 'без сбоев с' : 'недоступен с'} ${relTime(s.since)}</span>
+          ${sparkline(s.spark)}
+        </div>
+        ${s.error ? `<p class="err mono">${s.error}</p>` : ''}
+      </article>`;
+  }
+
+  function render(data) {
+    const banner = $('banner');
+    const map = { operational: 'up', degraded: 'partial', down: 'down' };
+    banner.className = `banner ${map[data.overall]}`;
+    $('banner-text').textContent =
+      data.overall === 'operational'
+        ? 'Все системы работают'
+        : data.overall === 'degraded'
+          ? 'Частичный сбой'
+          : 'Массовый сбой';
+    $('updated').textContent = `проверено ${relTime(data.updated)}`;
+
+    $('content').innerHTML = data.groups
+      .map((g) => {
+        const items = data.services.filter((s) => s.group === g.id);
+        if (!items.length) return '';
+        return `<section class="block">
+          <h2>${g.title}</h2>
+          ${items.map(serviceRow).join('')}
+        </section>`;
+      })
+      .join('');
+
+    const list = data.incidents || [];
+    if (list.length) {
+      $('incidents-block').hidden = false;
+      $('incidents').innerHTML = list
+        .map(
+          (i) => `<li class="incident ${i.end ? 'closed' : 'open'}">
+            <span class="mono when">${new Date(i.start).toLocaleString('ru-RU')}</span>
+            <span class="what"><b>${i.name}</b> — ${i.reason}</span>
+            <span class="mono how-long">${i.end ? duration(i.durationMs) : 'продолжается'}</span>
+          </li>`,
+        )
+        .join('');
+    }
+  }
+
+  async function load() {
+    try {
+      const res = await fetch(`${DATA_URL}?t=${Date.now()}`, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      render(await res.json());
+    } catch (e) {
+      $('banner').className = 'banner down';
+      $('banner-text').textContent = 'Не удалось загрузить данные проверок';
+      $('updated').textContent = String(e.message || e);
+    }
+  }
+
+  load();
+  setInterval(load, 60_000);
+</script>
+
+<style>
+  main { padding: clamp(2rem, 6vw, 4rem) 0 3rem; }
+
+  .head { margin-bottom: 1.6rem; }
+  .kicker { color: var(--accent); font-size: 0.8rem; margin: 0 0 0.6rem; }
+  h1 { font-size: clamp(1.8rem, 5vw, 2.6rem); font-weight: 800; }
+  .sub { color: var(--text-dim); margin: 0.6rem 0 0; max-width: 62ch; font-size: 0.95rem; }
+
+  /* ---------- баннер общего состояния ---------- */
+  .banner {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.9rem 1.1rem;
+    border-radius: var(--radius);
+    border: 1px solid var(--line);
+    background: var(--bg-raise);
+    font-weight: 650;
+    margin-bottom: 1.8rem;
+  }
+  .banner .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--none);
+    flex: none;
+  }
+  .banner.up { border-color: color-mix(in oklch, var(--up) 45%, transparent); }
+  .banner.up .dot { background: var(--up); box-shadow: 0 0 12px var(--up); }
+  .banner.partial { border-color: color-mix(in oklch, var(--partial) 45%, transparent); }
+  .banner.partial .dot { background: var(--partial); box-shadow: 0 0 12px var(--partial); }
+  .banner.down { border-color: color-mix(in oklch, var(--down) 50%, transparent); }
+  .banner.down .dot { background: var(--down); box-shadow: 0 0 12px var(--down); }
+  .updated { margin-left: auto; color: var(--text-dim); font-size: 0.75rem; font-weight: 400; }
+
+  /* ---------- блоки и строки сервисов ---------- */
+  .block { margin-bottom: 2rem; }
+  .block h2 {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--text-dim);
+    margin-bottom: 0.8rem;
+    font-family: var(--font-mono);
+  }
+
+  :global(.row) {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--bg-raise);
+    padding: 1rem 1.1rem;
+  }
+  :global(.row + .row) { margin-top: 0.7rem; }
+  :global(.row.down) { border-color: color-mix(in oklch, var(--down) 45%, transparent); }
+
+  :global(.row-head) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+  :global(.ident) { display: flex; align-items: center; gap: 0.7rem; }
+  :global(.state-dot) {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex: none;
+    background: var(--none);
+  }
+  :global(.row.up .state-dot) { background: var(--up); box-shadow: 0 0 10px var(--up); }
+  :global(.row.down .state-dot) { background: var(--down); box-shadow: 0 0 10px var(--down); }
+
+  :global(.name) { margin: 0; font-weight: 650; font-size: 0.98rem; }
+  :global(.name a) { color: var(--text); }
+  :global(.name a:hover) { color: var(--accent); }
+  :global(.note) { margin: 0; color: var(--text-dim); font-size: 0.8rem; }
+
+  :global(.meta) { display: flex; align-items: center; gap: 0.6rem; }
+  :global(.latency) { color: var(--text-dim); font-size: 0.78rem; }
+  :global(.badge) {
+    font-size: 0.72rem;
+    font-family: var(--font-mono);
+    padding: 0.2em 0.7em;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+  }
+  :global(.badge.up) {
+    color: var(--up);
+    border-color: color-mix(in oklch, var(--up) 45%, transparent);
+    background: color-mix(in oklch, var(--up) 10%, transparent);
+  }
+  :global(.badge.down) {
+    color: var(--down);
+    border-color: color-mix(in oklch, var(--down) 50%, transparent);
+    background: color-mix(in oklch, var(--down) 12%, transparent);
+  }
+  :global(.cert) {
+    font-size: 0.7rem;
+    font-family: var(--font-mono);
+    color: var(--text-dim);
+    padding: 0.2em 0.6em;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+  }
+  :global(.cert.partial) { color: var(--partial); border-color: color-mix(in oklch, var(--partial) 45%, transparent); }
+  :global(.cert.down) { color: var(--down); border-color: color-mix(in oklch, var(--down) 50%, transparent); }
+
+  /* ---------- шкала 90 дней ---------- */
+  :global(.bars) {
+    display: flex;
+    gap: 2px;
+    margin: 0.9rem 0 0.7rem;
+    height: 30px;
+    align-items: stretch;
+  }
+  :global(.bar) {
+    flex: 1 1 0;
+    min-width: 2px;
+    border-radius: 2px;
+    background: var(--none);
+  }
+  :global(.bar.up) { background: var(--up); }
+  :global(.bar.partial) { background: var(--partial); }
+  :global(.bar.down) { background: var(--down); }
+  :global(.bar:hover) { filter: brightness(1.35); }
+
+  :global(.row-foot) {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+  }
+  :global(.row-foot b) { color: var(--text); font-weight: 600; }
+  :global(.since) { color: var(--text-dim); }
+  :global(.spark) { margin-left: auto; width: 120px; height: 22px; color: var(--accent); opacity: 0.8; }
+  :global(.err) { margin: 0.6rem 0 0; color: var(--down); font-size: 0.78rem; }
+
+  /* ---------- инциденты ---------- */
+  .incidents { list-style: none; margin: 0; padding: 0; }
+  :global(.incident) {
+    display: flex;
+    gap: 0.9rem;
+    align-items: baseline;
+    flex-wrap: wrap;
+    padding: 0.7rem 0.9rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--bg-raise);
+    font-size: 0.85rem;
+  }
+  :global(.incident + .incident) { margin-top: 0.5rem; }
+  :global(.incident.open) { border-color: color-mix(in oklch, var(--down) 45%, transparent); }
+  :global(.incident .when) { color: var(--text-dim); font-size: 0.72rem; }
+  :global(.incident .how-long) { margin-left: auto; color: var(--text-dim); font-size: 0.72rem; }
+
+  .foot {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    border-top: 1px solid var(--line);
+    padding-top: 1.2rem;
+    margin-top: 2.5rem;
+    color: var(--text-dim);
+    font-size: 0.75rem;
+  }
+
+  @media (max-width: 560px) {
+    :global(.meta) { width: 100%; justify-content: flex-start; }
+    :global(.spark) { display: none; }
+  }
+</style>
