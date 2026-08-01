@@ -52,13 +52,29 @@ jobs:
       - id: deployment
         uses: actions/deploy-pages@v4
 
+      # Проверяем канонический адрес выкатки, а не status.samoy.love: пока
+      # CNAME-записи нет, кастомный домен не резолвится, и красный workflow
+      # говорил бы о проблеме с DNS, а не с публикацией.
       - name: Проверить, что страница жива
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
         run: |
           for i in $(seq 1 10); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 https://status.samoy.love/ || true)
-            echo "попытка $i: HTTP $code"
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$PAGE_URL" || true)
+            echo "попытка $i: HTTP $code ($PAGE_URL)"
             [ "$code" = "200" ] && exit 0
             sleep 6
           done
-          echo '::error::status.samoy.love не отвечает 200 после публикации'
+          echo "::error::страница не отвечает 200 после публикации: $PAGE_URL"
           exit 1
+
+      # Кастомный домен проверяем мягко: до настройки DNS это ожидаемо не работает.
+      - name: Проверить кастомный домен (необязательно)
+        continue-on-error: true
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 https://status.samoy.love/ || true)
+          if [ "$code" = "200" ]; then
+            echo "status.samoy.love отвечает 200"
+          else
+            echo "::warning::status.samoy.love вернул $code — проверьте CNAME-запись в DNS"
+          fi
