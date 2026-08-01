@@ -1,0 +1,76 @@
+{
+  "groups": [
+    { "id": "sites", "title": "Сайты" },
+    { "id": "services", "title": "Сервисы и API" }
+  ],
+  "services": [
+    {
+      "id": "samoy",
+      "name": "samoy.love",
+      "note": "Личная страница",
+      "group": "sites",
+      "url": "https://samoy.love/",
+      "expect": 200,
+      "cert": "samoy.love"
+    },
+    {
+      "id": "metro",
+      "name": "metro.samoy.love",
+      "note": "Схема метро, офлайн-PWA",
+      "group": "sites",
+      "url": "https://metro.samoy.love/",
+      "expect": 200,
+      "cert": "metro.samoy.love"
+    },
+    {
+      "id": "launcher",
+      "name": "launcher.samoy.love",
+      "note": "Сайт лаунчера ChillHub",
+      "group": "sites",
+      "url": "https://launcher.samoy.love/",
+      "expect": 200,
+      "cert": "launcher.samoy.love"
+    },
+    {
+      "id": "snakes",
+      "name": "snakes.samoy.love",
+      "note": "Клиент игры",
+      "group": "sites",
+      "url": "https://snakes.samoy.love/",
+      "expect": 200,
+      "cert": "snakes.samoy.love"
+    },
+    {
+      "id": "snakes-health",
+      "name": "Snakes · игровой сервер",
+      "note": "Go + WebSocket, /healthz",
+      "group": "services",
+      "url": "https://snakes.samoy.love/healthz",
+      "expect": 200
+    },
+    {
+      "id": "launcher-admin",
+      "name": "Лаунчер · API админки",
+      "note": "/admin/api/health",
+      "group": "services",
+      "url": "https://launcher.samoy.love/admin/api/health",
+      "expect": 200
+    },
+    {
+      "id": "launcher-api",
+      "name": "Лаунчер · публичное API",
+      "note": "Манифест последней версии",
+      "group": "services",
+      "url": "https://launcher.samoy.love/manifests/launcher/latest.json",
+      "expect": 200
+    },
+    {
+      "id": "metro-sw",
+      "name": "Metro · service worker",
+      "note": "Офлайн-режим PWA",
+      "group": "services",
+      "url": "https://metro.samoy.love/kitty-metro-sw.js",
+      "expect": 200
+    }
+  ]
+}

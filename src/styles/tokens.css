@@ -1,0 +1,48 @@
+/* Токены общие с samoy.love — статус-страница выглядит частью того же хозяйства */
+:root {
+  --bg: oklch(0.13 0.015 260);
+  --bg-raise: oklch(0.17 0.02 260);
+  --text: oklch(0.93 0.01 260);
+  --text-dim: oklch(0.68 0.015 260);
+  --accent: oklch(0.78 0.16 195);
+  --line: color-mix(in oklch, var(--text) 12%, transparent);
+
+  --up: oklch(0.78 0.17 150);
+  --partial: oklch(0.8 0.16 75);
+  --down: oklch(0.68 0.2 25);
+  --none: color-mix(in oklch, var(--text) 14%, transparent);
+
+  --font-sans: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, Consolas, monospace;
+  --radius: 14px;
+  --container: min(1000px, 92vw);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { color-scheme: dark; -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+h1, h2, h3 { margin: 0; line-height: 1.2; letter-spacing: -0.02em; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+
+.container { width: var(--container); margin-inline: auto; }
+.mono { font-family: var(--font-mono); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
