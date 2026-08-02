@@ -41,34 +41,49 @@ src/                 страница (Astro)
 дата выкатки. Единый `/version.json` во всех сервисах — задача общего
 пайплайна `deploy-kit`.
 
-## Установка на сервер
+## Выкатка
+
+Общим пайплайном [deploy-kit](https://github.com/tr0llex/deploy-kit). Две
+независимые цели: страница и агент. Правка страницы не перезапускает сбор
+метрик, обновление агента не ждёт пересборки статики.
 
 ```bash
-# 1. Собрать агента (Go есть на сервере)
-cd agent && go build -o status-agent .
+# из GitHub Actions: Actions -> Deploy -> Run workflow (both | site | agent)
+# локально тем же контрактом:
+deploy-kit/bin/deploy --config .deploy-kit/site.env
+deploy-kit/bin/deploy --config .deploy-kit/agent.env
+```
 
-# 2. Разложить
+Раскладка на сервере: релизы в `<корень>/releases/<версия>`, рабочая версия —
+симлинк `current`. Страница живёт в `/var/www/status`, агент в
+`/opt/status-agent`, systemd-юнит запускает его через `current` и потому не
+правится при выкатке.
+
+Откат без пересборки:
+
+```bash
+ssh ubuntu@<host> 'sudo /opt/deploy-kit/rollback.sh --app status-site --root /var/www/status --list'
+ssh ubuntu@<host> 'sudo /opt/deploy-kit/rollback.sh --app status-site --root /var/www/status --nginx-reload'
+```
+
+Данные проверок лежат в `/var/www/status/data` — **вне** каталога релизов,
+поэтому история переживает любую выкатку.
+
+### Первичная настройка (один раз)
+
+```bash
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin status
-sudo mkdir -p /var/www/status/site /var/www/status/data /var/www/status-acme /etc/status-agent
+sudo mkdir -p /var/www/status/data /var/www/status-acme /etc/status-agent
 sudo chown -R status:status /var/www/status/data
-sudo install -m 0755 status-agent /usr/local/bin/status-agent
-sudo install -m 0644 ../config/status.json /etc/status-agent/status.json
-sudo install -m 0644 ../deploy/systemd/status-agent.{service,timer} /etc/systemd/system/
+sudo install -m 0644 config/status.json /etc/status-agent/status.json
+sudo install -m 0644 deploy/systemd/status-agent.{service,timer} /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now status-agent.timer
 
-# 3. Страница
-npm ci && npm run build
-rsync -a --delete dist/ /var/www/status/site/
-
-# 4. nginx (после того, как A-запись домена указывает на сервер)
 sudo install -m 0644 deploy/nginx/status.samoy.love.conf /etc/nginx/sites-available/
 sudo ln -sfn /etc/nginx/sites-available/status.samoy.love.conf /etc/nginx/sites-enabled/
 sudo certbot certonly --webroot -w /var/www/status-acme -d status.samoy.love
 sudo nginx -t && sudo systemctl reload nginx
 ```
-
-Данные лежат в `/var/www/status/data` — **вне** каталога сайта, чтобы выкатка
-с `--delete` не снесла историю.
 
 ## Внешний сторож
 
