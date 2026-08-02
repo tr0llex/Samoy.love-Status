@@ -28,6 +28,16 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: 'deps'
+    ignore:
+      # TypeScript 7 не встаёт, пока его не поддержит typescript-eslint: тот
+      # объявляет peer typescript ">=4.8.4 <6.1.0", и npm ci падает на
+      # разрешении зависимостей ещё до компиляции. Это очередь обновлений, а
+      # не наш код.
+      #
+      # СНЯТЬ, как только typescript-eslint объявит поддержку 7.x — вместе с
+      # обновлением самого typescript-eslint, одним PR.
+      - dependency-name: 'typescript'
+        update-types: ['version-update:semver-major']
   - package-ecosystem: 'gomod'
     directory: '/agent'
     schedule:
