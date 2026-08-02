@@ -56,11 +56,22 @@ sudo systemctl daemon-reload && sudo systemctl enable --now samoylove-bot.servic
 она молча отставала, и заметить это можно было только по пустому `impact` на
 странице.
 
-Если старая копия осталась на хосте, её можно убрать: агент её больше не
-читает.
+**Юнит надо переустановить один раз**, иначе агент продолжит читать старую
+копию: путь к конфигу задан в `ExecStart`, а юниты выкаткой не доставляются.
+Пока это не сделано, правки конфига — названия проектов, `impact`, пороги —
+до прода не доезжают, хотя код там уже новый.
 
 ```bash
-sudo rm -rf /etc/status-agent
+sudo install -m 0644 deploy/systemd/status-agent.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo rm -rf /etc/status-agent   # старая копия больше не читается
+```
+
+Проверить, что доехало: в `summary.json` на проде у проверок должен появиться
+непустой `impact`.
+
+```bash
+curl -s https://status.samoy.love/data/summary.json | grep -o '"impact":"[^"]*"' | head -3
 ```
 
 ## Переезд бота на новое имя (один раз)

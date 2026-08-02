@@ -24,9 +24,54 @@ on:
         default: false
 
 jobs:
+  # Что вообще менялось.
+  #
+  # Раньше любой пуш катил все три цели, и в Telegram приходило «бот выкачен»
+  # после правки, которая бота не касалась. Лишняя выкатка — это не только
+  # шум: каждая из них перезапускает службу и обнуляет аптайм на ровном месте.
+  #
+  # Общие файлы (конфиг проверок, .deploy-kit, сам workflow) намеренно
+  # затрагивают всех: от них зависит поведение каждой цели.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      site: ${{ steps.f.outputs.site }}
+      agent: ${{ steps.f.outputs.agent }}
+      bot: ${{ steps.f.outputs.bot }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - id: f
+        run: |
+          # На ручном запуске выбор делает человек — считаем, что менялось всё.
+          if [ "${{ github.event_name }}" != "push" ]; then
+            printf 'site=true\nagent=true\nbot=true\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          FILES=$(git diff --name-only HEAD^ HEAD)
+          echo "изменилось:"; echo "$FILES" | sed 's/^/  /'
+
+          common='^(config/|\.deploy-kit/|\.github/workflows/deploy\.yml|package(-lock)?\.json)'
+          if echo "$FILES" | grep -qE "$common"; then
+            echo 'общие файлы — катим все цели'
+            printf 'site=true\nagent=true\nbot=true\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "$FILES" | grep -qE '^(src/|public/|astro\.config|tsconfig)' && S=true || S=false
+          echo "$FILES" | grep -qE '^agent/' && A=true || A=false
+          echo "$FILES" | grep -qE '^bot/'   && B=true || B=false
+          printf 'site=%s\nagent=%s\nbot=%s\n' "$S" "$A" "$B" >> "$GITHUB_OUTPUT"
+
   site:
-    # На push инпутов нет — катим всё; на ручном запуске выбирают цель.
-    if: inputs.target == '' || inputs.target == 'all' || inputs.target == 'site'
+    needs: changes
+    # На push инпутов нет — смотрим, что менялось; на ручном выбирают цель.
+    if: >-
+      (inputs.target == '' && needs.changes.outputs.site == 'true')
+      || inputs.target == 'all' || inputs.target == 'site'
     uses: tr0llex/deploy-kit/.github/workflows/static-site.yml@main
     with:
       config: .deploy-kit/site.env
@@ -38,7 +83,10 @@ jobs:
     secrets: inherit
 
   agent:
-    if: inputs.target == '' || inputs.target == 'all' || inputs.target == 'agent'
+    needs: changes
+    if: >-
+      (inputs.target == '' && needs.changes.outputs.agent == 'true')
+      || inputs.target == 'all' || inputs.target == 'agent'
     uses: tr0llex/deploy-kit/.github/workflows/go-service.yml@main
     with:
       config: .deploy-kit/agent.env
@@ -52,11 +100,12 @@ jobs:
     # concurrency общая на репозиторий. Запущенные одновременно, они попадают
     # в одну очередь, и ожидающий отменяется — бот стабильно падал за 0 секунд,
     # ничего не выкатив. Поэтому он ждёт агента, а не стартует параллельно.
-    needs: agent
+    needs: [changes, agent]
     if: >-
       !cancelled()
       && (needs.agent.result == 'success' || needs.agent.result == 'skipped')
-      && (inputs.target == '' || inputs.target == 'all' || inputs.target == 'bot')
+      && ((inputs.target == '' && needs.changes.outputs.bot == 'true')
+          || inputs.target == 'all' || inputs.target == 'bot')
     uses: tr0llex/deploy-kit/.github/workflows/go-service.yml@main
     with:
       config: .deploy-kit/bot.env
