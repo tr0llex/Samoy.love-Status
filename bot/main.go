@@ -121,7 +121,7 @@ func main() {
 			mu.Unlock()
 
 			for _, e := range events {
-				if err := tg.Send(ctx, owner, formatEvent(e)); err != nil {
+				if err := tg.SendWith(ctx, owner, formatEvent(e), alertKeyboard()); err != nil {
 					log.Printf("уведомление не отправлено (%s %s): %v", e.Kind, e.Key, err)
 					continue
 				}
@@ -187,7 +187,7 @@ func sendCurrentStatus(ctx context.Context, tg *Telegram, owner int64, summaryPa
 	if err != nil {
 		return err
 	}
-	return tg.Send(ctx, owner, formatStatus(s, time.Now().UTC()))
+	return tg.SendWith(ctx, owner, formatStatus(s, time.Now().UTC()), navKeyboard(ViewStatus))
 }
 
 // handleUpdate отвечает на одно сообщение.
@@ -195,6 +195,11 @@ func sendCurrentStatus(ctx context.Context, tg *Telegram, owner int64, summaryPa
 // Чужие чаты игнорируются молча: любой ответ незнакомцу — это подтверждение,
 // что бот жив и слушает, и приглашение продолжать.
 func handleUpdate(ctx context.Context, tg *Telegram, u Update, owner int64, self, summaryPath string) {
+	// Нажатие на кнопку: перерисовываем тот же экран на месте.
+	if q := u.CallbackQuery; q != nil {
+		handleCallback(ctx, tg, q, owner, summaryPath)
+		return
+	}
 	if u.Message == nil || u.Message.Chat.ID != owner {
 		return
 	}
@@ -204,7 +209,7 @@ func handleUpdate(ctx context.Context, tg *Telegram, u Update, owner int64, self
 	}
 	cmd := resolveCommand(word)
 	if cmd == "" {
-		if err := tg.Send(ctx, owner, "Не знаю такой команды.\n\n"+formatHelp()); err != nil {
+		if err := tg.SendWith(ctx, owner, "Не знаю такой команды.\n\n"+formatHelp(), navKeyboard(ViewHelp)); err != nil {
 			log.Printf("ответ не отправлен: %v", err)
 		}
 		return
@@ -215,27 +220,9 @@ func handleUpdate(ctx context.Context, tg *Telegram, u Update, owner int64, self
 	// ему делать нечего.
 	log.Printf("команда /%s", cmd)
 
-	now := time.Now().UTC()
-	var text string
-	if cmd == CmdHelp {
-		text = formatHelp()
-	} else {
-		s, err := loadSummary(summaryPath)
-		if err != nil {
-			log.Printf("данные агента не прочитаны: %v", err)
-			text = "🔴 Не могу прочитать данные агента — похоже, он не работает"
-		} else {
-			switch cmd {
-			case CmdStatus:
-				text = formatStatus(s, now)
-			case CmdVersions:
-				text = formatVersions(s, now)
-			case CmdIncidents:
-				text = formatIncidents(s, now)
-			}
-		}
-	}
-	if err := tg.Send(ctx, owner, text); err != nil {
+	view := viewOf(cmd)
+	text := renderView(view, summaryPath, time.Now().UTC())
+	if err := tg.SendWith(ctx, owner, text, navKeyboard(view)); err != nil {
 		log.Printf("ответ на /%s не отправлен: %v", cmd, err)
 	}
 }

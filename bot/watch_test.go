@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -253,5 +254,75 @@ func TestBrokenStateFile(t *testing.T) {
 	st := loadState(path)
 	if st.Items == nil || st.Versions == nil {
 		t.Fatal("из битого файла должно получиться пустое рабочее состояние")
+	}
+}
+
+func TestМедленнаяПроверкаНеСчитаетсяПадением(t *testing.T) {
+	// Появление состояния "slow" не должно будить владельца: сервис отвечает,
+	// просто дольше порога. Раньше здесь стояло `c.Status != "up"`, и любая
+	// ночная просадка читалась бы как авария.
+	s := &Summary{
+		Updated: time.Now().UTC().Format(time.RFC3339),
+		Projects: []Project{{
+			ID: "p", Title: "Проект",
+			Checks: []Check{{
+				ID: "c", Name: "Сайт", Status: "slow", Critical: true,
+				Since: time.Now().UTC().Format(time.RFC3339),
+				Error: "ответ за 4200 мс при пороге 3000 мс",
+			}},
+		}},
+	}
+	st := newState()
+	if ev := st.Apply(s, time.Now(), time.Hour, time.Hour); len(ev) != 0 {
+		t.Fatalf("медленный ответ не повод для уведомления, получили %+v", ev)
+	}
+	if st.Items["check:c"].Down {
+		t.Error("медленная проверка не должна помечаться как лежащая")
+	}
+}
+
+func TestПадениеВсёЕщёЗамечается(t *testing.T) {
+	now := time.Now()
+	s := &Summary{
+		Updated: now.UTC().Format(time.RFC3339),
+		Projects: []Project{{
+			ID: "p", Title: "Проект",
+			Checks: []Check{{
+				ID: "c", Name: "Сайт", Status: "down", Critical: true,
+				Since: now.UTC().Format(time.RFC3339), Error: "HTTP 502",
+				Impact: "Сайт не открывается",
+			}},
+		}},
+	}
+	st := newState()
+	ev := st.Apply(s, now, time.Hour, time.Hour)
+	if len(ev) == 0 {
+		t.Fatal("о падении обязаны сообщить")
+	}
+	// В уведомлении полезнее последствие, чем код ошибки.
+	if ev[0].Reason != "Сайт не открывается" {
+		t.Errorf("в причине ожидали impact, получили %q", ev[0].Reason)
+	}
+}
+
+func TestВторостепеннаяПроверкаПомеченаВУведомлении(t *testing.T) {
+	now := time.Now()
+	s := &Summary{
+		Updated: now.UTC().Format(time.RFC3339),
+		Projects: []Project{{
+			ID: "p", Title: "ChillHub",
+			Checks: []Check{{
+				ID: "admin", Name: "API админки", Status: "down", Critical: false,
+				Since: now.UTC().Format(time.RFC3339), Error: "HTTP 502",
+			}},
+		}},
+	}
+	st := newState()
+	ev := st.Apply(s, now, time.Hour, time.Hour)
+	if len(ev) == 0 {
+		t.Fatal("о падении второстепенной проверки тоже сообщаем")
+	}
+	if !strings.Contains(ev[0].Title, "второстепенная") {
+		t.Errorf("владелец должен видеть, что проверка второстепенная: %q", ev[0].Title)
 	}
 }

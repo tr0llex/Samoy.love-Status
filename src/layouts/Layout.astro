@@ -1,6 +1,7 @@
 ---
+// Из веб-шрифтов остался только Inter — он общий с samoy.love и держит
+// узнаваемость. Моноширинный берём системный: см. --font-mono в tokens.css.
 import '@fontsource-variable/inter';
-import '@fontsource-variable/jetbrains-mono';
 import '../styles/tokens.css';
 
 interface Props {
@@ -20,7 +21,8 @@ const { title, description } = Astro.props;
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
-    <meta name="theme-color" content="#191c24" />
+    <meta name="theme-color" content="#f7f7f8" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#191c24" media="(prefers-color-scheme: dark)" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   </head>
   <body>

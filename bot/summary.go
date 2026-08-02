@@ -14,8 +14,9 @@ import (
 // состояние одного и того же сервиса. Единственный источник правды — файл
 // агента, бот его только читает и пересказывает.
 //
-// Описаны не все поля: истории по дням и спарклайны нужны странице, а в
-// сообщении их всё равно не показать.
+// Описаны не все поля: спарклайны времени ответа нужны только странице.
+// А вот история по дням пригодилась — из неё бот рисует полоску доступности
+// цветными квадратами, и две недели умещаются в одну строку сообщения.
 
 type Summary struct {
 	Updated   string     `json:"updated"`
@@ -25,30 +26,51 @@ type Summary struct {
 }
 
 type Project struct {
-	ID     string  `json:"id"`
-	Title  string  `json:"title"`
-	URL    string  `json:"url"`
-	Status string  `json:"status"`
-	Up     int     `json:"up"`
-	Total  int     `json:"total"`
-	Checks []Check `json:"checks"`
-	Units  []Unit  `json:"units"`
-	Builds []Build `json:"builds"`
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	URL    string `json:"url"`
+	Status string `json:"status"`
+	// Up/Total — по критичным проверкам: они определяют вердикт проекта.
+	Up    int `json:"up"`
+	Total int `json:"total"`
+	// Второстепенные проверки не в порядке. Вердикт они не роняют, но
+	// умолчать о них нельзя: иначе сломанная админка исчезает из отчёта.
+	AuxDown int     `json:"auxDown"`
+	AuxSlow int     `json:"auxSlow"`
+	Slow    int     `json:"slow"`
+	Checks  []Check `json:"checks"`
+	Units   []Unit  `json:"units"`
+	Builds  []Build `json:"builds"`
 }
 
 type Check struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	URL    string `json:"url"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	URL  string `json:"url"`
+	// Status: "up", "slow" или "down". «Медленно» — не падение: сервис
+	// отвечает, просто дольше порога, и будить этим владельца нельзя.
 	Status string `json:"status"`
-	Since  string `json:"since"`
-	Ms     int64  `json:"ms"`
-	Code   int    `json:"code"`
-	Error  string `json:"error"`
+	// Critical: падение второстепенной проверки не роняет вердикт проекта.
+	Critical bool   `json:"critical"`
+	Impact   string `json:"impact"`
+	Since    string `json:"since"`
+	Ms       int64  `json:"ms"`
+	Code     int    `json:"code"`
+	Error    string `json:"error"`
 	// Уровень доступности за сутки/неделю/90 дней. Значение может быть null,
 	// пока замеров нет, поэтому указатель, а не число.
-	Uptime   map[string]*float64 `json:"uptime"`
-	CertDays *int                `json:"certDays"`
+	Uptime    map[string]*float64 `json:"uptime"`
+	CertDays  *int                `json:"certDays"`
+	CertState string              `json:"certState"`
+	// Days — 90 ячеек по календарю; null там, где замеров за сутки нет.
+	// Указатель именно поэтому: «нет данных» и «ноль доступности» — разное.
+	Days []*Day `json:"days"`
+}
+
+type Day struct {
+	D     string `json:"d"`
+	Up    int64  `json:"up"`
+	Total int64  `json:"total"`
 }
 
 type Unit struct {

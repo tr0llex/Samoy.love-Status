@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -122,30 +123,30 @@ func TestCheckHTTPStatuses(t *testing.T) {
 	defer srv.Close()
 	client := srv.Client()
 
-	r := checkHTTP(Check{URL: srv.URL + "/ok", Expect: 200}, client)
-	if !r.ok || r.code != 200 {
-		t.Errorf("ожидали успех, получили ok=%v code=%d err=%q", r.ok, r.code, r.errText)
+	r := checkOnce(Check{URL: srv.URL + "/ok", Expect: 200}, client)
+	if r.status != statusUp || r.code != 200 {
+		t.Errorf("ожидали успех, получили status=%q code=%d err=%q", r.status, r.code, r.errText)
 	}
 
-	r = checkHTTP(Check{URL: srv.URL + "/teapot", Expect: 200}, client)
-	if r.ok {
+	r = checkOnce(Check{URL: srv.URL + "/teapot", Expect: 200}, client)
+	if r.ok() {
 		t.Error("код 418 при ожидаемом 200 — это провал проверки")
 	}
-	if r.errText != "HTTP 418" {
+	if r.errText != "HTTP 418 вместо 200" {
 		t.Errorf("в ошибке должен быть код ответа, получили %q", r.errText)
 	}
 
 	// Ожидаемым может быть не только 200: например, редирект-заглушка.
-	r = checkHTTP(Check{URL: srv.URL + "/teapot", Expect: 418}, client)
-	if !r.ok {
+	r = checkOnce(Check{URL: srv.URL + "/teapot", Expect: 418}, client)
+	if !r.ok() {
 		t.Error("если 418 и есть ожидаемый код, проверка успешна")
 	}
 }
 
 func TestCheckHTTPUnreachable(t *testing.T) {
 	// Порт, на котором заведомо никто не слушает.
-	r := checkHTTP(Check{URL: "http://127.0.0.1:1/", Expect: 200}, &http.Client{Timeout: 2 * time.Second})
-	if r.ok {
+	r := checkOnce(Check{URL: "http://127.0.0.1:1/", Expect: 200}, &http.Client{Timeout: 2 * time.Second})
+	if r.ok() {
 		t.Error("недоступный адрес не может быть успешной проверкой")
 	}
 	if r.errText == "" {
@@ -298,4 +299,64 @@ func contains(haystack, needle string) bool {
 		}
 		return false
 	})()
+}
+
+func TestRecordReleaseAppendsOnlyOnChange(t *testing.T) {
+	now := time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC)
+	var h []Release
+
+	h = recordRelease(h, OutBuild{Version: "v1", At: "2026-08-01T00:00:00Z"}, now)
+	if len(h) != 1 {
+		t.Fatalf("первая версия должна попасть в историю, получили %d записей", len(h))
+	}
+	if h[0].Seen != now.Format(time.RFC3339) {
+		t.Errorf("момент обнаружения версии не записан: %+v", h[0])
+	}
+
+	// Тот же самый релиз проверяется раз в минуту — плодить записи нельзя.
+	h = recordRelease(h, OutBuild{Version: "v1", At: "2026-08-01T00:00:00Z"}, now.Add(time.Minute))
+	if len(h) != 1 {
+		t.Fatalf("неизменная версия не должна дублироваться, получили %d записей", len(h))
+	}
+
+	h = recordRelease(h, OutBuild{Version: "v2"}, now.Add(time.Hour))
+	if len(h) != 2 || h[0].Version != "v2" {
+		t.Fatalf("новая версия должна встать первой, получили %+v", h)
+	}
+}
+
+func TestRecordReleaseKeepsRollback(t *testing.T) {
+	// Откат на предыдущую версию — это тоже выкатка. Если сравнивать со всем
+	// списком, а не только с последней записью, откат исчезнет из истории.
+	now := time.Now().UTC()
+	var h []Release
+	h = recordRelease(h, OutBuild{Version: "v1"}, now)
+	h = recordRelease(h, OutBuild{Version: "v2"}, now.Add(time.Minute))
+	h = recordRelease(h, OutBuild{Version: "v1"}, now.Add(2*time.Minute))
+
+	if len(h) != 3 {
+		t.Fatalf("откат должен попасть в историю отдельной записью, получили %d", len(h))
+	}
+	if h[0].Version != "v1" || h[1].Version != "v2" {
+		t.Errorf("порядок истории нарушен: %+v", h)
+	}
+}
+
+func TestRecordReleaseIgnoresEmptyVersionAndTrims(t *testing.T) {
+	now := time.Now().UTC()
+	// Сервис не отдал version.json — писать в историю нечего.
+	if got := recordRelease(nil, OutBuild{Title: "Сайт"}, now); got != nil {
+		t.Errorf("пустая версия не должна попадать в историю, получили %+v", got)
+	}
+
+	var h []Release
+	for i := 0; i < releasesKeep+5; i++ {
+		h = recordRelease(h, OutBuild{Version: fmt.Sprintf("v%d", i)}, now.Add(time.Duration(i)*time.Minute))
+	}
+	if len(h) != releasesKeep {
+		t.Fatalf("история обрезается до %d записей, получили %d", releasesKeep, len(h))
+	}
+	if h[0].Version != fmt.Sprintf("v%d", releasesKeep+4) {
+		t.Errorf("свежая версия должна остаться первой, получили %q", h[0].Version)
+	}
 }

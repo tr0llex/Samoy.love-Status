@@ -18,6 +18,7 @@ const (
 	up       = "🟢"
 	down     = "🔴"
 	degraded = "🟠"
+	slowIcon = "🟡"
 	unknown  = "⚪️"
 )
 
@@ -63,7 +64,11 @@ func statusIcon(status string) string {
 		return up
 	case "down":
 		return down
-	case "degraded":
+	case "slow":
+		// «Медленно» — не падение и не норма: сервис отвечает, но дольше
+		// порога. Своя иконка, чтобы не путать ни с тем, ни с другим.
+		return slowIcon
+	case "degraded", "major":
 		return degraded
 	default:
 		return unknown
@@ -74,12 +79,21 @@ func formatHelp() string {
 	return strings.Join([]string{
 		"<b>Статус samoy.love</b>",
 		"",
+		"Кнопки под сообщением переключают экраны прямо здесь — новые",
+		"сообщения при этом не плодятся, переписывается текущее.",
+		"«📊 Открыть» показывает страницу целиком, не выходя из Telegram.",
+		"",
+		"Если удобнее командами:",
 		"/status — что живо, что лежит, аптайм",
-		"/versions — версии сервисов и страниц со временем сборки",
+		"/versions — версии сервисов со временем сборки",
 		"/incidents — последние падения",
 		"/help — эта справка",
 		"",
 		"Сам сообщу, когда что-то упадёт, поднимется или обновится.",
+		"Про «медленно» будить не буду — это видно на экране статуса.",
+		"",
+		"<b>Полоска доступности</b> под проектом — две недели по суткам:",
+		"🟩 без сбоев · 🟨 меньше 1% · 🟧 до 10% · 🟥 больше · ⬜ нет данных",
 	}, "\n")
 }
 
@@ -87,34 +101,157 @@ func formatHelp() string {
 //
 // Порядок проектов не сортируется: он задан конфигом и совпадает с порядком
 // на самой странице, чтобы взгляд искал сервис в одном и том же месте.
+// stripDays — сколько суток показываем полоской. Четырнадцать умещаются в
+// одну строку на телефоне; девяносто, как на странице, переносились бы и
+// превращались в кашу.
+const stripDays = 14
+
+// Квадраты полоски. Порог тот же, что у ступеней на странице: сутки с одной
+// сбойной минутой из 1440 не должны выглядеть как сутки, лежавшие наполовину.
+func dayCell(d *Day) string {
+	if d == nil || d.Total == 0 {
+		return "⬜"
+	}
+	switch ratio := float64(d.Up) / float64(d.Total); {
+	case ratio == 1:
+		return "🟩"
+	case ratio >= 0.99:
+		return "🟨"
+	case ratio >= 0.9:
+		return "🟧"
+	default:
+		return "🟥"
+	}
+}
+
+// projectStrip — доступность проекта за две недели одной строкой.
+//
+// Считаем по ключевым проверкам и по худшей из них за сутки: если в этот день
+// лежал игровой сервер, день плохой, даже когда сайт открывался.
+func projectStrip(p Project) string {
+	worst := make([]*Day, stripDays)
+	for _, c := range p.Checks {
+		if !c.Critical || len(c.Days) == 0 {
+			continue
+		}
+		days := c.Days
+		if len(days) > stripDays {
+			days = days[len(days)-stripDays:]
+		}
+		for i, d := range days {
+			slot := stripDays - len(days) + i
+			if slot < 0 || d == nil || d.Total == 0 {
+				continue
+			}
+			cur := worst[slot]
+			if cur == nil || float64(d.Up)/float64(d.Total) < float64(cur.Up)/float64(cur.Total) {
+				worst[slot] = d
+			}
+		}
+	}
+	var b strings.Builder
+	for _, d := range worst {
+		b.WriteString(dayCell(d))
+	}
+	return b.String()
+}
+
 func formatStatus(s *Summary, now time.Time) string {
 	var b strings.Builder
 
+	// Заголовок — одно утверждение крупно, как на странице: с него читают.
 	switch s.Overall {
 	case "operational":
-		b.WriteString(up + " <b>Всё работает</b>\n")
+		b.WriteString(up + " <b>Всё работает</b>")
 	case "down":
-		b.WriteString(down + " <b>Всё лежит</b>\n")
+		b.WriteString(down + " <b>Всё лежит</b>")
+	case "major":
+		// Ступень между частичным и массовым: больше половины ключевых
+		// проверок лежит. Раньше это описывалось словом «частичный».
+		b.WriteString(down + " <b>Крупный сбой</b>")
 	default:
-		b.WriteString(degraded + " <b>Частичный сбой</b>\n")
+		b.WriteString(degraded + " <b>Частичный сбой</b>")
+	}
+
+	// Сводка одной строкой под заголовком.
+	var okCrit, totalCrit, auxBad int
+	for _, p := range s.Projects {
+		okCrit += p.Up
+		totalCrit += p.Total
+		auxBad += p.AuxDown + p.AuxSlow
+	}
+	fmt.Fprintf(&b, "\n<code>%d/%d</code> ключевых проверок в норме", okCrit, totalCrit)
+	if auxBad > 0 {
+		fmt.Fprintf(&b, " · <code>%d</code> второстеп. не в порядке", auxBad)
+	}
+	b.WriteString("\n")
+
+	// Сломанное — отдельным блоком наверху, ровно как на странице: искать
+	// красную строку среди зелёных владелец не должен.
+	var broken []string
+	for _, p := range s.Projects {
+		for _, c := range p.Checks {
+			if c.Status != "down" {
+				continue
+			}
+			line := fmt.Sprintf("%s <b>%s · %s</b>", statusIcon(c.Status), esc(p.Title), esc(c.Name))
+			if !c.Critical {
+				line = fmt.Sprintf("%s <b>%s · %s</b> <i>(второстеп.)</i>",
+					degraded, esc(p.Title), esc(c.Name))
+			}
+			if c.Impact != "" {
+				line += "\n   " + esc(c.Impact)
+			}
+			if c.Error != "" {
+				line += "\n   <code>" + esc(c.Error) + "</code>"
+			}
+			if t, ok := parseTime(c.Since); ok {
+				line += "\n   недоступен " + humanDur(now.Sub(t))
+			}
+			broken = append(broken, line)
+		}
+	}
+	if len(broken) > 0 {
+		b.WriteString("\n" + strings.Join(broken, "\n") + "\n")
 	}
 
 	for _, p := range s.Projects {
-		fmt.Fprintf(&b, "\n%s <b>%s</b> — %d/%d\n",
-			statusIcon(p.Status), esc(p.Title), p.Up, p.Total)
+		aux := ""
+		if n := p.AuxDown + p.AuxSlow; n > 0 {
+			aux = fmt.Sprintf(" <i>+%d второстеп.</i>", n)
+		}
+		fmt.Fprintf(&b, "\n%s <b>%s</b> <code>%d/%d</code>%s\n",
+			statusIcon(p.Status), esc(p.Title), p.Up, p.Total, aux)
+
+		if strip := projectStrip(p); strings.Contains(strip, "🟩") ||
+			strings.Contains(strip, "🟨") || strings.Contains(strip, "🟧") ||
+			strings.Contains(strip, "🟥") {
+			b.WriteString(strip + " <i>14 дн.</i>\n")
+		}
 
 		for _, c := range p.Checks {
-			fmt.Fprintf(&b, "  %s %s", statusIcon(c.Status), esc(c.Name))
-			if c.Status == "up" {
-				fmt.Fprintf(&b, " — %d мс", c.Ms)
-			} else if c.Error != "" {
-				fmt.Fprintf(&b, " — %s", esc(c.Error))
+			mark := " "
+			if !c.Critical {
+				mark = "·"
+			}
+			fmt.Fprintf(&b, "%s%s %s", mark, statusIcon(c.Status), esc(c.Name))
+			switch c.Status {
+			case "up":
+				fmt.Fprintf(&b, " <code>%d мс</code>", c.Ms)
+			case "slow":
+				fmt.Fprintf(&b, " <code>%d мс</code> — медленно", c.Ms)
+			default:
+				// Причину не повторяем: она уже развёрнута в блоке сбоев
+				// наверху, а здесь строка должна остаться в одну.
+				b.WriteString(" — недоступен")
 			}
 			if v := c.Uptime["d1"]; v != nil {
-				fmt.Fprintf(&b, ", сутки %.2f%%", *v)
+				fmt.Fprintf(&b, " · сутки <code>%.2f%%</code>", *v)
 			}
-			if t, ok := parseTime(c.Since); ok {
-				fmt.Fprintf(&b, ", в этом состоянии %s", humanDur(now.Sub(t)))
+			// Сколько держится текущее состояние. У упавших это уже сказано
+			// в блоке сбоев выше, здесь — про то, как давно всё хорошо.
+			if t, ok := parseTime(c.Since); ok && c.Status != "down" {
+				fmt.Fprintf(&b, " · %s", humanDur(now.Sub(t)))
 			}
 			b.WriteString("\n")
 		}
@@ -124,7 +261,7 @@ func formatStatus(s *Summary, now time.Time) string {
 			if u.Active {
 				icon = up
 			}
-			fmt.Fprintf(&b, "  %s %s — %s", icon, esc(u.Title), esc(u.State))
+			fmt.Fprintf(&b, " %s %s — %s", icon, esc(u.Title), esc(u.State))
 			if t, ok := parseTime(u.Since); ok && u.Active {
 				fmt.Fprintf(&b, ", аптайм %s", humanDur(now.Sub(t)))
 			}

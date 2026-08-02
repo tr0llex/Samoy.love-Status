@@ -109,11 +109,19 @@ func targets(s *Summary, now time.Time, stale time.Duration) []target {
 			if !ok {
 				since = now
 			}
+			// Падением считаем ТОЛЬКО "down". Появившееся состояние "slow"
+			// означает, что сервис отвечает, просто дольше порога, — будить
+			// этим владельца и открывать инцидент нельзя. Иначе любая
+			// сетевая просадка ночью читалась бы как авария.
+			title := p.Title + " · " + c.Name
+			if !c.Critical {
+				title += " (второстепенная)"
+			}
 			out = append(out, target{
 				key:    "check:" + c.ID,
-				title:  p.Title + " · " + c.Name,
-				reason: c.Error,
-				down:   c.Status != "up",
+				title:  title,
+				reason: firstNonEmptyStr(c.Impact, c.Error),
+				down:   c.Status == "down",
 				since:  since,
 			})
 		}
@@ -235,4 +243,18 @@ func (st *State) Apply(s *Summary, now time.Time, remind, stale time.Duration) [
 	}
 
 	return events
+}
+
+// firstNonEmptyStr — первое непустое из перечисленного.
+//
+// В уведомлении полезнее человеческая формулировка последствия («матчи не
+// идут»), чем текст ошибки; но если impact в конфиге не заполнен, показать
+// нужно хоть что-то.
+func firstNonEmptyStr(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
