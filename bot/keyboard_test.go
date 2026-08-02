@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestКлавиатураПомечаетТекущийЭкран(t *testing.T) {
@@ -71,15 +72,74 @@ func TestНеизвестнаяКнопкаНеЛомаетЭкран(t *testing
 func TestЭкранСправкиНеЧитаетДанные(t *testing.T) {
 	// Справка обязана открываться, даже когда агент не работает: это
 	// единственный экран, которому данные не нужны.
-	got := renderView(ViewHelp, "/нет/такого/файла.json", base)
+	got, _ := renderView(ViewHelp, "/нет/такого/файла.json", base)
 	if !strings.Contains(got, "Статус samoy.love") {
 		t.Errorf("справка не отрисовалась: %q", got)
 	}
 }
 
 func TestЭкранСообщаетОНедоступныхДанных(t *testing.T) {
-	got := renderView(ViewStatus, "/нет/такого/файла.json", base)
+	got, _ := renderView(ViewStatus, "/нет/такого/файла.json", base)
 	if !strings.Contains(got, "данные агента") && !strings.Contains(got, "не работает") {
 		t.Errorf("о нечитаемых данных надо сказать прямо: %q", got)
+	}
+}
+
+func TestКнопкиПроектовНесутСостояние(t *testing.T) {
+	// Состояние проекта переехало на кнопку: общий экран от этого короткий,
+	// а «что с чем» видно, не читая текст.
+	s := summaryAt(base, "down", base, false, "v1")
+	kb := statusKeyboard(s)
+	var found bool
+	for _, row := range kb.InlineKeyboard {
+		for _, b := range row {
+			if b.CallbackData == ViewProject+"snakes" {
+				found = true
+				if !strings.Contains(b.Text, "Snakes") {
+					t.Errorf("на кнопке нет названия проекта: %q", b.Text)
+				}
+				if !strings.Contains(b.Text, down) {
+					t.Errorf("на кнопке нет состояния: %q", b.Text)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("на экране статуса нет кнопки проекта")
+	}
+}
+
+func TestЭкранПроектаПоказываетПодробности(t *testing.T) {
+	s := summaryAt(base, "down", base.Add(-time.Hour), false, "v1")
+	path := writeSummaryOf(t, s)
+
+	text, kb := renderView(ViewProject+"snakes", path, base)
+	for _, want := range []string{"Snakes", "Клиент", "HTTP 502", "Игровой сервер", "v1"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("на экране проекта нет %q:\n%s", want, text)
+		}
+	}
+	if kb == nil {
+		t.Fatal("под экраном проекта нет клавиатуры")
+	}
+}
+
+func TestИсчезнувшийПроектВозвращаетНаСтатус(t *testing.T) {
+	// Кнопка могла прийти из старого сообщения, а проект — уехать из конфига.
+	path := writeSummaryOf(t, summaryAt(base, "up", base, true, "v1"))
+	text, _ := renderView(ViewProject+"нет-такого", path, base)
+	if !strings.Contains(text, "ключевых проверок") {
+		t.Errorf("ожидали общий экран, получили:\n%s", text)
+	}
+}
+
+func TestКнопкаПодУведомлениемВедётВУпавшийПроект(t *testing.T) {
+	kb := alertKeyboard("metro")
+	if got := kb.InlineKeyboard[0][0].CallbackData; got != ViewProject+"metro" {
+		t.Errorf("кнопка ведёт на %q, а не в упавший проект", got)
+	}
+	// Событие без проекта (устаревшие данные агента) — общий экран.
+	if got := alertKeyboard("").InlineKeyboard[0][0].CallbackData; got != ViewStatus {
+		t.Errorf("без проекта ожидали общий экран, получили %q", got)
 	}
 }

@@ -410,3 +410,27 @@ func TestЧасовоеОкноТожеПоКалендарю(t *testing.T) {
 		t.Errorf("старая корзина вне окна не должна вытягивать цифру, ожидали 50, получили %v", *got)
 	}
 }
+
+func TestМёртваяСлужбаРоняетВердикт(t *testing.T) {
+	// Юниты в вердикт не входили вовсе: бот будил владельца сообщением
+	// «служба упала», а страница в ту же минуту показывала «Все системы
+	// работают». Проверяем, что расхождения больше нет.
+	op := OutProject{Total: 2, Up: 2, UnitsDown: 1}
+	if got := projectStatus(op); got != "degraded" {
+		t.Errorf("проект с мёртвой службой: %q, ожидали degraded", got)
+	}
+	// Не «лежит»: запросы в этот момент часто ещё обслуживаются.
+	if got := projectStatus(OutProject{Total: 2, Up: 2, UnitsDown: 2}); got == statusDown {
+		t.Error("мёртвая служба при живых проверках не должна означать «лежит»")
+	}
+	// Проект вообще без критичных проверок — судим по службам.
+	if got := projectStatus(OutProject{UnitsDown: 1}); got != "degraded" {
+		t.Errorf("проект без проверок с мёртвой службой: %q", got)
+	}
+	if got := overallStatus([]OutProject{{Total: 2, Up: 2, UnitsDown: 1}}); got != "degraded" {
+		t.Errorf("общий вердикт с мёртвой службой: %q, ожидали degraded", got)
+	}
+	if got := overallStatus([]OutProject{{UnitsDown: 1}}); got != "degraded" {
+		t.Errorf("общий вердикт без проверок, но с мёртвой службой: %q", got)
+	}
+}

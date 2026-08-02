@@ -24,25 +24,41 @@ func viewOf(cmd string) string {
 	}
 }
 
-// renderView собирает текст экрана. Данные читаются на каждый показ: между
-// нажатиями кнопок агент успевает записать новое состояние, и показывать
-// закэшированное значило бы врать в ответ на «Обновить».
-func renderView(view, summaryPath string, now time.Time) string {
+// renderView собирает текст экрана и клавиатуру под ним. Данные читаются на
+// каждый показ: между нажатиями кнопок агент успевает записать новое
+// состояние, и показывать закэшированное значило бы врать в ответ на
+// «Обновить».
+//
+// Клавиатура возвращается вместе с текстом, потому что зависит от тех же
+// данных: на кнопке проекта нарисовано его состояние. Собирать её отдельно
+// значило бы прочитать файл дважды и получить кнопку от одного момента
+// времени поверх текста от другого.
+func renderView(view, summaryPath string, now time.Time) (string, *Keyboard) {
 	if view == ViewHelp {
-		return formatHelp()
+		return formatHelp(), navKeyboard(ViewHelp)
 	}
 	s, err := loadSummary(summaryPath)
 	if err != nil {
 		log.Printf("данные агента не прочитаны: %v", err)
-		return "🔴 Не могу прочитать данные агента — похоже, он не работает"
+		return "🔴 Не могу прочитать данные агента — похоже, он не работает", navKeyboard(view)
+	}
+	if id, ok := projectOfView(view); ok {
+		for _, p := range s.Projects {
+			if p.ID == id {
+				return formatProject(p, s, now), projectKeyboard(s, view)
+			}
+		}
+		// Проект исчез из конфига, а кнопка на него осталась в старом
+		// сообщении. Молча возвращаем на общий экран.
+		return formatStatus(s, now), statusKeyboard(s)
 	}
 	switch view {
 	case ViewVersions:
-		return formatVersions(s, now)
+		return formatVersions(s, now), navKeyboard(view)
 	case ViewIncidents:
-		return formatIncidents(s, now)
+		return formatIncidents(s, now), navKeyboard(view)
 	default:
-		return formatStatus(s, now)
+		return formatStatus(s, now), statusKeyboard(s)
 	}
 }
 
@@ -71,16 +87,18 @@ func handleCallback(ctx context.Context, tg *Telegram, q *CallbackQuery, owner i
 	}
 
 	view := q.Data
-	switch view {
-	case ViewStatus, ViewVersions, ViewIncidents, ViewHelp:
-	default:
-		// Кнопка из сообщения, отправленного прошлой версией бота.
-		view = ViewStatus
+	if _, isProject := projectOfView(view); !isProject {
+		switch view {
+		case ViewStatus, ViewVersions, ViewIncidents, ViewHelp:
+		default:
+			// Кнопка из сообщения, отправленного прошлой версией бота.
+			view = ViewStatus
+		}
 	}
 
 	log.Printf("кнопка %s", view)
-	text := renderView(view, summaryPath, time.Now().UTC())
-	if err := tg.Edit(ctx, q.Message.Chat.ID, q.Message.MessageID, text, navKeyboard(view)); err != nil {
+	text, kb := renderView(view, summaryPath, time.Now().UTC())
+	if err := tg.Edit(ctx, q.Message.Chat.ID, q.Message.MessageID, text, kb); err != nil {
 		log.Printf("экран %s не перерисован: %v", view, err)
 	}
 }

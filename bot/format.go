@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"html"
+	"sort"
 	"strings"
 	"time"
 )
@@ -81,7 +82,9 @@ func formatHelp() string {
 		"",
 		"Кнопки под сообщением переключают экраны прямо здесь — новые",
 		"сообщения при этом не плодятся, переписывается текущее.",
-		"«📊 Открыть» показывает страницу целиком, не выходя из Telegram.",
+		"Верхний ряд — проекты: значок показывает состояние, нажатие",
+		"раскрывает проверки, службы, версии и историю по дням.",
+		"«Открыть» показывает страницу целиком, не выходя из Telegram.",
 		"",
 		"Если удобнее командами:",
 		"/status — что живо, что лежит, аптайм",
@@ -124,22 +127,24 @@ func dayCell(d *Day) string {
 	}
 }
 
-// projectStrip — доступность проекта за две недели одной строкой.
+// worstDays — худшая ключевая проверка за каждые сутки.
 //
 // Считаем по ключевым проверкам и по худшей из них за сутки: если в этот день
-// лежал игровой сервер, день плохой, даже когда сайт открывался.
-func projectStrip(p Project) string {
-	worst := make([]*Day, stripDays)
-	for _, c := range p.Checks {
+// лежал игровой сервер, день плохой, даже когда сайт открывался. Та же логика
+// живёт в src/lib/status.ts для страницы и мини-аппа — расхождение здесь
+// означало бы, что бот и страница рисуют разную историю одного дня.
+func worstDays(checks []Check, count int) []*Day {
+	worst := make([]*Day, count)
+	for _, c := range checks {
 		if !c.Critical || len(c.Days) == 0 {
 			continue
 		}
 		days := c.Days
-		if len(days) > stripDays {
-			days = days[len(days)-stripDays:]
+		if len(days) > count {
+			days = days[len(days)-count:]
 		}
 		for i, d := range days {
-			slot := stripDays - len(days) + i
+			slot := count - len(days) + i
 			if slot < 0 || d == nil || d.Total == 0 {
 				continue
 			}
@@ -149,12 +154,33 @@ func projectStrip(p Project) string {
 			}
 		}
 	}
+	return worst
+}
+
+func strip(days []*Day) string {
 	var b strings.Builder
-	for _, d := range worst {
+	for _, d := range days {
 		b.WriteString(dayCell(d))
 	}
 	return b.String()
 }
+
+// projectStrip — доступность проекта за две недели одной строкой.
+func projectStrip(p Project) string { return strip(worstDays(p.Checks, stripDays)) }
+
+// overallStrip — то же по всей экосистеме: одна строка вместо пяти
+// одинаково зелёных полосок под каждым проектом.
+func overallStrip(s *Summary) string {
+	var all []Check
+	for _, p := range s.Projects {
+		all = append(all, p.Checks...)
+	}
+	return strip(worstDays(all, stripDays))
+}
+
+// hasHistory — есть ли в полоске хоть один день с данными. Полоска из
+// четырнадцати белых квадратов не сообщает ничего и только занимает строку.
+func hasHistory(s string) bool { return strings.ContainsAny(s, "🟩🟨🟧🟥") }
 
 func formatStatus(s *Summary, now time.Time) string {
 	var b strings.Builder
@@ -192,11 +218,8 @@ func formatStatus(s *Summary, now time.Time) string {
 			if c.Status == "up" {
 				continue
 			}
-			icon, tail := statusIcon(c.Status), ""
-			if !c.Critical {
-				icon, tail = degraded, " <i>(второстеп.)</i>"
-			}
-			fmt.Fprintf(&b, "\n%s <b>%s · %s</b>%s", icon, link(p.Title, p.URL), link(c.Name, c.URL), tail)
+			fmt.Fprintf(&b, "\n%s <b>%s · %s</b>%s",
+				checkIcon(c), link(p.Title, p.URL), link(c.Name, c.URL), auxTail(c))
 			if c.Impact != "" && c.Status == "down" {
 				b.WriteString("\n   " + esc(c.Impact))
 			}
@@ -208,21 +231,6 @@ func formatStatus(s *Summary, now time.Time) string {
 			}
 			b.WriteString("\n")
 		}
-	}
-
-	// Остальные проекты — по строке. Полоска за две недели говорит о них
-	// больше, чем перечисление процентов у каждой проверки.
-	b.WriteString("\n")
-	for _, p := range s.Projects {
-		aux := ""
-		if n := p.AuxDown + p.AuxSlow; n > 0 {
-			aux = fmt.Sprintf(" <i>+%d</i>", n)
-		}
-		fmt.Fprintf(&b, "%s %s <code>%d/%d</code>%s", statusIcon(p.Status), link(p.Title, p.URL), p.Up, p.Total, aux)
-		if strip := projectStrip(p); strings.ContainsAny(strip, "🟩🟨🟧🟥") {
-			b.WriteString("\n" + strip)
-		}
-		b.WriteString("\n")
 	}
 
 	// Службы показываем только когда с ними что-то не так: перечислять
@@ -239,8 +247,132 @@ func formatStatus(s *Summary, now time.Time) string {
 		b.WriteString("\n" + strings.Join(dead, "\n") + "\n")
 	}
 
+	// Одна полоска на всю экосистему вместо пяти одинаковых под каждым
+	// проектом. Разбивка по проектам — на кнопках и на экране проекта.
+	if st := overallStrip(s); hasHistory(st) {
+		fmt.Fprintf(&b, "\n%s\n<i>%d дней</i>\n", st, stripDays)
+	}
+
 	b.WriteString("\n" + freshness(s, now))
 	return b.String()
+}
+
+// formatProject — экран одного проекта.
+//
+// Сюда переехали подробности, которые раньше печатались для всех проектов
+// сразу: проверки с аптаймом, службы, версии, полоска. Общий экран от этого
+// стал коротким, а разбор конкретного сервиса — полным.
+func formatProject(p Project, s *Summary, now time.Time) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s <b>%s</b>", statusIcon(p.Status), link(p.Title, p.URL))
+	fmt.Fprintf(&b, "\n<code>%d/%d</code> ключевых проверок в норме\n", p.Up, p.Total)
+
+	// Сломанные проверки идут первыми: на экране проекта ищут именно их.
+	sorted := append([]Check(nil), p.Checks...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return checkRank(sorted[i]) < checkRank(sorted[j])
+	})
+
+	for _, c := range sorted {
+		fmt.Fprintf(&b, "\n%s <b>%s</b>%s", checkIcon(c), link(c.Name, c.URL), auxTail(c))
+		if c.Status == "up" {
+			if u := uptimeText(c); u != "" {
+				b.WriteString(" — " + u)
+			}
+			continue
+		}
+		if c.Impact != "" && c.Status == "down" {
+			b.WriteString("\n   " + esc(c.Impact))
+		}
+		if c.Error != "" {
+			b.WriteString("\n   <code>" + esc(c.Error) + "</code>")
+		}
+		if t, ok := parseTime(c.Since); ok {
+			fmt.Fprintf(&b, "\n   %s", humanDur(now.Sub(t)))
+		}
+	}
+	b.WriteString("\n")
+
+	if len(p.Units) > 0 {
+		b.WriteString("\n<b>Службы</b>")
+		for _, u := range p.Units {
+			icon := up
+			if !u.Active {
+				icon = down
+			}
+			fmt.Fprintf(&b, "\n%s %s — %s", icon, esc(u.Title), esc(u.State))
+		}
+		b.WriteString("\n")
+	}
+
+	if len(p.Builds) > 0 {
+		b.WriteString("\n<b>Версии</b>")
+		for _, bl := range p.Builds {
+			version := bl.Version
+			if version == "" {
+				version = "неизвестна"
+			}
+			fmt.Fprintf(&b, "\n%s: <code>%s</code>", link(bl.Title, bl.URL), esc(version))
+			if t, ok := parseTime(bl.At); ok {
+				fmt.Fprintf(&b, " · %s назад", humanDur(now.Sub(t)))
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	if st := projectStrip(p); hasHistory(st) {
+		fmt.Fprintf(&b, "\n%s\n<i>%d дней</i>\n", st, stripDays)
+	}
+
+	b.WriteString("\n" + freshness(s, now))
+	return b.String()
+}
+
+// checkIcon — значок проверки.
+//
+// У второстепенной упавшей проверки значок оранжевый, а не красный: она не
+// роняет вердикт проекта, и красный кружок рядом с работающим сервисом
+// заставляет искать аварию там, где её нет. Функция одна на общий экран и на
+// экран проекта — иначе одна и та же проверка выглядела бы на них по-разному.
+func checkIcon(c Check) string {
+	if !c.Critical && c.Status == "down" {
+		return degraded
+	}
+	return statusIcon(c.Status)
+}
+
+func auxTail(c Check) string {
+	if c.Critical {
+		return ""
+	}
+	return " <i>(второстеп.)</i>"
+}
+
+// checkRank — порядок проверок на экране проекта: сначала лежащие, потом
+// медленные, потом живые. Внутри группы порядок конфига сохраняется.
+func checkRank(c Check) int {
+	switch {
+	case c.Status == "down" && c.Critical:
+		return 0
+	case c.Status == "down":
+		return 1
+	case c.Status == "slow":
+		return 2
+	default:
+		return 3
+	}
+}
+
+// uptimeText — доступность живой проверки короткой строкой.
+func uptimeText(c Check) string {
+	v, ok := c.Uptime["d90"]
+	if !ok || v == nil {
+		if v, ok = c.Uptime["d7"]; !ok || v == nil {
+			return ""
+		}
+		return fmt.Sprintf("%.2f%% за неделю", *v*100)
+	}
+	return fmt.Sprintf("%.2f%% за 90 дней", *v*100)
 }
 
 // freshness — строка о свежести данных.
