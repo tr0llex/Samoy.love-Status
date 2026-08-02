@@ -107,6 +107,22 @@ func TestMissingDataIsReported(t *testing.T) {
 	}
 }
 
+func TestSendCurrentStatus(t *testing.T) {
+	var sent []string
+	tg := recorder(t, &sent)
+	if err := sendCurrentStatus(context.Background(), tg, owner, writeSummary(t)); err != nil {
+		t.Fatalf("проверка канала не прошла: %v", err)
+	}
+	if len(sent) != 1 || !strings.Contains(sent[0], "Snakes") {
+		t.Fatalf("сводка не отправлена: %v", sent)
+	}
+
+	// Нет данных — проверка обязана провалиться, а не «пройти» молча.
+	if err := sendCurrentStatus(context.Background(), tg, owner, filepath.Join(t.TempDir(), "нет.json")); err == nil {
+		t.Fatal("без данных агента проверка не может считаться успешной")
+	}
+}
+
 func TestEnvDuration(t *testing.T) {
 	t.Setenv("REMIND_INTERVAL", "3m")
 	if got := envDuration("REMIND_INTERVAL", time.Hour); got != 3*time.Minute {

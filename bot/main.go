@@ -53,6 +53,8 @@ func main() {
 		"как часто перечитывать данные агента")
 	stale := flag.Duration("stale", envDuration("STALE_AFTER", 5*time.Minute),
 		"с какого возраста данные агента считаются устаревшими")
+	selftest := flag.Bool("selftest", false,
+		"отправить владельцу текущее состояние и выйти — проверка канала после выкатки")
 	flag.Parse()
 
 	staleAfter = *stale
@@ -79,6 +81,16 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// Проверка канала после выкатки. Молчащий бот неотличим от работающего,
+	// пока что-нибудь не упадёт, — а выяснять это в момент аварии поздно.
+	if *selftest {
+		if err := sendCurrentStatus(ctx, tg, owner, summaryPath); err != nil {
+			log.Fatalf("проверка не прошла: %v", err)
+		}
+		log.Print("проверка прошла: сводка отправлена владельцу")
+		return
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -169,6 +181,15 @@ func main() {
 	log.Print("бот остановлен")
 }
 
+// sendCurrentStatus отправляет владельцу то же, что он получил бы по /status.
+func sendCurrentStatus(ctx context.Context, tg *Telegram, owner int64, summaryPath string) error {
+	s, err := loadSummary(summaryPath)
+	if err != nil {
+		return err
+	}
+	return tg.Send(ctx, owner, formatStatus(s, time.Now().UTC()))
+}
+
 // handleUpdate отвечает на одно сообщение.
 //
 // Чужие чаты игнорируются молча: любой ответ незнакомцу — это подтверждение,
@@ -188,6 +209,11 @@ func handleUpdate(ctx context.Context, tg *Telegram, u Update, owner int64, self
 		}
 		return
 	}
+
+	// Команды логируются: без этого не понять, дошло ли сообщение до бота,
+	// когда владельцу кажется, что тот молчит. Текст не пишем — в журнале
+	// ему делать нечего.
+	log.Printf("команда /%s", cmd)
 
 	now := time.Now().UTC()
 	var text string

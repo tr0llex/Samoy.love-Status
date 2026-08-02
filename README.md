@@ -71,6 +71,18 @@ src/                 страница (Astro)
 Токен и chat id — в `/etc/samoy-bot/env` (0600, root), образец:
 `deploy/samoy-bot.env.example`. В репозитории значений нет.
 
+Проверить канал после выкатки:
+
+```bash
+sudo systemd-run --pipe --uid=samoy-bot \
+  --property=EnvironmentFile=/etc/samoy-bot/env \
+  /opt/samoy-bot/current/samoy-bot -selftest
+```
+
+Придёт та же сводка, что и по `/status`. Молчащий бот неотличим от
+работающего, пока что-нибудь не упадёт, — а выяснять это в момент аварии
+поздно.
+
 ## Выкатка
 
 Общим пайплайном [deploy-kit](https://github.com/tr0llex/deploy-kit). Три
