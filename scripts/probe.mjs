@@ -393,6 +393,13 @@ const esc = (s) =>
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 
+// Подпись со ссылкой на сам сервис: увидел «недоступен» — хочешь открыть и
+// посмотреть, а не искать адрес руками. Пускаем только http(s).
+const link = (text, url) =>
+  typeof url === 'string' && /^https?:\/\//.test(url)
+    ? `<a href="${esc(url)}">${esc(text)}</a>`
+    : esc(text);
+
 // ---------------------------------------------------------------- дед-мэн
 //
 // Жив ли агент — вопрос не только сам по себе. От ответа зависит, говорит ли
@@ -506,7 +513,7 @@ for (const r of results) {
     since = new Date(now).toISOString();
     // Второстепенность — в заголовке, ровно как у бота: канал должен читаться
     // одним голосом, а не двумя разными форматами.
-    const label = esc(s.fullName) + (isCritical(s) ? '' : ' (второстепенная)');
+    const label = link(s.fullName, s.url) + (isCritical(s) ? '' : ' (второстепенная)');
     const reason = esc(s.impact || r.error || '');
 
     if (status === DOWN) {
@@ -540,11 +547,13 @@ for (const r of results) {
   // видит только certDays из сводки и никогда о них не сообщает, а сторож
   // ходит по TLS сам. Сообщаем один раз при пересечении порога.
   if (r.certState === 'expired' && prev.certState !== 'expired') {
-    messages.push(`⛔ <b>${esc(s.fullName)}</b>: сертификат ИСТЁК`);
+    messages.push(`⛔ <b>${link(s.fullName, s.url)}</b>: сертификат ИСТЁК`);
   } else if (r.certState === 'invalid' && prev.certState !== 'invalid') {
-    messages.push(`⚠️ <b>${esc(s.fullName)}</b>: сертификат не проходит проверку`);
+    messages.push(`⚠️ <b>${link(s.fullName, s.url)}</b>: сертификат не проходит проверку`);
   } else if (r.certDays !== null && r.certDays <= 14 && (prev.certDays ?? 99) > 14) {
-    messages.push(`⚠️ <b>${esc(s.fullName)}</b>: сертификат истекает через ${r.certDays} дн.`);
+    messages.push(
+      `⚠️ <b>${link(s.fullName, s.url)}</b>: сертификат истекает через ${r.certDays} дн.`,
+    );
   }
 
   state.services[s.id] = {

@@ -194,11 +194,13 @@ func formatStatus(s *Summary, now time.Time) string {
 			if c.Status != "down" {
 				continue
 			}
-			line := fmt.Sprintf("%s <b>%s · %s</b>", statusIcon(c.Status), esc(p.Title), esc(c.Name))
+			icon := statusIcon(c.Status)
+			tail := ""
 			if !c.Critical {
-				line = fmt.Sprintf("%s <b>%s · %s</b> <i>(второстеп.)</i>",
-					degraded, esc(p.Title), esc(c.Name))
+				icon, tail = degraded, " <i>(второстеп.)</i>"
 			}
+			line := fmt.Sprintf("%s <b>%s · %s</b>%s",
+				icon, link(p.Title, p.URL), link(c.Name, c.URL), tail)
 			if c.Impact != "" {
 				line += "\n   " + esc(c.Impact)
 			}
@@ -221,7 +223,7 @@ func formatStatus(s *Summary, now time.Time) string {
 			aux = fmt.Sprintf(" <i>+%d второстеп.</i>", n)
 		}
 		fmt.Fprintf(&b, "\n%s <b>%s</b> <code>%d/%d</code>%s\n",
-			statusIcon(p.Status), esc(p.Title), p.Up, p.Total, aux)
+			statusIcon(p.Status), link(p.Title, p.URL), p.Up, p.Total, aux)
 
 		if strip := projectStrip(p); strings.Contains(strip, "🟩") ||
 			strings.Contains(strip, "🟨") || strings.Contains(strip, "🟧") ||
@@ -234,7 +236,7 @@ func formatStatus(s *Summary, now time.Time) string {
 			if !c.Critical {
 				mark = "·"
 			}
-			fmt.Fprintf(&b, "%s%s %s", mark, statusIcon(c.Status), esc(c.Name))
+			fmt.Fprintf(&b, "%s%s %s", mark, statusIcon(c.Status), link(c.Name, c.URL))
 			switch c.Status {
 			case "up":
 				fmt.Fprintf(&b, " <code>%d мс</code>", c.Ms)
@@ -295,7 +297,7 @@ func formatVersions(s *Summary, now time.Time) string {
 	var b strings.Builder
 	b.WriteString("<b>Версии</b>\n")
 	for _, p := range s.Projects {
-		fmt.Fprintf(&b, "\n<b>%s</b>\n", esc(p.Title))
+		fmt.Fprintf(&b, "\n<b>%s</b>\n", link(p.Title, p.URL))
 		if len(p.Builds) == 0 {
 			b.WriteString("  источник версии не настроен\n")
 			continue
@@ -305,7 +307,7 @@ func formatVersions(s *Summary, now time.Time) string {
 			if version == "" {
 				version = "неизвестна"
 			}
-			fmt.Fprintf(&b, "  %s: <code>%s</code>", esc(bl.Title), esc(version))
+			fmt.Fprintf(&b, "  %s: <code>%s</code>", link(bl.Title, bl.URL), esc(version))
 			if t, ok := parseTime(bl.At); ok {
 				fmt.Fprintf(&b, "\n    собрано %s (%s назад)", fmtTime(t), humanDur(now.Sub(t)))
 			}
@@ -355,13 +357,13 @@ func incidentStatus(in Incident) string {
 func formatEvent(e Event) string {
 	switch e.Kind {
 	case KindDown:
-		s := fmt.Sprintf("%s <b>%s</b> недоступен", down, esc(e.Title))
+		s := fmt.Sprintf("%s <b>%s</b> недоступен", down, link(e.Title, e.URL))
 		if e.Reason != "" {
 			s += "\n" + esc(e.Reason)
 		}
 		return s + "\n" + fmtTime(e.At)
 	case KindStillDown:
-		s := fmt.Sprintf("%s <b>%s</b> всё ещё недоступен — %s", down, esc(e.Title), humanDur(e.Duration))
+		s := fmt.Sprintf("%s <b>%s</b> всё ещё недоступен — %s", down, link(e.Title, e.URL), humanDur(e.Duration))
 		if e.Reason != "" {
 			s += "\n" + esc(e.Reason)
 		}
@@ -370,7 +372,7 @@ func formatEvent(e Event) string {
 		return fmt.Sprintf("%s <b>%s</b> снова работает\nпростой: %s\n%s",
 			up, esc(e.Title), humanDur(e.Duration), fmtTime(e.At))
 	case KindRelease:
-		s := fmt.Sprintf("🚀 <b>%s</b> обновлён\nверсия: <code>%s</code>", esc(e.Title), esc(e.Version))
+		s := fmt.Sprintf("🚀 <b>%s</b> обновлён\nверсия: <code>%s</code>", link(e.Title, e.URL), esc(e.Version))
 		if e.Previous != "" {
 			s += fmt.Sprintf(" (была <code>%s</code>)", esc(e.Previous))
 		}
@@ -378,4 +380,17 @@ func formatEvent(e Event) string {
 	default:
 		return esc(e.Title)
 	}
+}
+
+// link — подпись со ссылкой на сам сервис.
+//
+// Уведомление без ссылки заставляет владельца искать адрес руками ровно в тот
+// момент, когда некогда: увидел «недоступен» — хочешь открыть и посмотреть.
+// Адрес пускаем только http(s): в конфиге он свой, но подставлять в разметку
+// что попало всё равно не стоит.
+func link(text, url string) string {
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		return esc(text)
+	}
+	return fmt.Sprintf(`<a href="%s">%s</a>`, esc(url), esc(text))
 }

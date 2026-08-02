@@ -19,9 +19,12 @@ const (
 
 // Event — то, о чём стоит написать владельцу.
 type Event struct {
-	Key      string
-	Kind     Kind
+	Key  string
+	Kind Kind
+	// Title и URL идут вместе: уведомление без ссылки заставляет искать адрес
+	// руками ровно тогда, когда некогда.
 	Title    string
+	URL      string
 	Reason   string
 	Duration time.Duration
 	Version  string
@@ -96,6 +99,7 @@ func saveState(path string, st *State) error {
 type target struct {
 	key    string
 	title  string
+	url    string
 	reason string
 	down   bool
 	since  time.Time
@@ -120,6 +124,7 @@ func targets(s *Summary, now time.Time, stale time.Duration) []target {
 			out = append(out, target{
 				key:    "check:" + c.ID,
 				title:  title,
+				url:    firstNonEmptyStr(c.URL, p.URL),
 				reason: firstNonEmptyStr(c.Impact, c.Error),
 				down:   c.Status == "down",
 				since:  since,
@@ -133,6 +138,7 @@ func targets(s *Summary, now time.Time, stale time.Duration) []target {
 			out = append(out, target{
 				key:    "unit:" + u.Name,
 				title:  p.Title + " · " + u.Title,
+				url:    p.URL,
 				reason: "состояние юнита: " + u.State,
 				down:   !u.Active,
 				since:  since,
@@ -153,6 +159,7 @@ func targets(s *Summary, now time.Time, stale time.Duration) []target {
 	out = append(out, target{
 		key:    "data",
 		title:  "Данные статуса",
+		url:    statusPageURL,
 		reason: fmt.Sprintf("агент не обновлял summary.json %s", humanDur(age)),
 		down:   age >= stale,
 		since:  updated,

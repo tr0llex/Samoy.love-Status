@@ -12,6 +12,10 @@ import "os"
 // callback_data ограничен 64 байтами, поэтому в него кладём короткий ключ
 // экрана, а не состояние: всё, что нужно для отрисовки, и так лежит в
 // summary.json.
+// statusPageURL — сама страница. Нужна там, где речь о ней самой: например,
+// когда бот сообщает, что данные агента перестали обновляться.
+const statusPageURL = "https://status.samoy.love/"
+
 const (
 	ViewStatus    = "v:status"
 	ViewVersions  = "v:versions"

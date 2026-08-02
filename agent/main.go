@@ -205,9 +205,12 @@ type OutUnit struct {
 }
 
 type OutBuild struct {
-	Title   string    `json:"title"`
-	Version string    `json:"version"`
-	At      string    `json:"at"`
+	Title   string `json:"title"`
+	Version string `json:"version"`
+	At      string `json:"at"`
+	// URL — адрес самого выкаченного компонента, а не проекта целиком.
+	// В сообщении о релизе полезно открыть именно то, что обновилось.
+	URL     string    `json:"url,omitempty"`
 	History []Release `json:"history,omitempty"`
 }
 
@@ -569,6 +572,14 @@ func unitState(name string) OutUnit {
 
 func buildInfo(b Build, client *http.Client) OutBuild {
 	out := OutBuild{Title: b.Title}
+	// Куда вести читателя за этим компонентом. У «url»-целей адрес известен
+	// точно: version.json отдаёт сам сервис, значит его origin и есть адрес.
+	// Для остальных ссылку подставит проект — здесь её взять неоткуда.
+	if b.Type == "url" {
+		if u, err := url.Parse(b.Path); err == nil && u.Scheme != "" && u.Host != "" {
+			out.URL = u.Scheme + "://" + u.Host + "/"
+		}
+	}
 	switch b.Type {
 	case "url":
 		// Отвечает сам сервис — значит, показана версия того, что реально
@@ -932,6 +943,9 @@ func main() {
 		}
 		for _, b := range p.Builds {
 			ob := buildInfo(b, client)
+			if ob.URL == "" {
+				ob.URL = p.URL
+			}
 			key := p.ID + "::" + b.Title
 			releases[key] = recordRelease(releases[key], ob, now)
 			ob.History = releases[key]

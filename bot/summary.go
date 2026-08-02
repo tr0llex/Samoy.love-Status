@@ -85,6 +85,9 @@ type Build struct {
 	Title   string `json:"title"`
 	Version string `json:"version"`
 	At      string `json:"at"`
+	// Адрес самого компонента: в сообщении о релизе открывать надо то, что
+	// обновилось, а не проект целиком.
+	URL string `json:"url"`
 }
 
 type Incident struct {

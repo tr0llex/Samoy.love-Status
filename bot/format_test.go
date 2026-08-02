@@ -237,3 +237,29 @@ func TestПолоскаБерётХудшуюИзКритичныхПровер�
 		t.Errorf("второстепенная проверка не должна красить полоску: %s", got)
 	}
 }
+
+func TestСсылкиВедутНаСервисы(t *testing.T) {
+	// Уведомление без ссылки заставляет искать адрес руками ровно тогда,
+	// когда некогда: увидел «недоступен» — хочешь открыть и посмотреть.
+	got := formatEvent(Event{
+		Kind: KindDown, Title: "Snakes · Игровой сервер",
+		URL: "https://snakes.samoy.love/healthz", Reason: "HTTP 502",
+	})
+	if !strings.Contains(got, `<a href="https://snakes.samoy.love/healthz">`) {
+		t.Errorf("в уведомлении о падении нет ссылки: %s", got)
+	}
+
+	rel := formatEvent(Event{
+		Kind: KindRelease, Title: "ChillHub · Публичный API",
+		URL: "https://launcher.samoy.love/", Version: "1.2.3",
+	})
+	if !strings.Contains(rel, `<a href="https://launcher.samoy.love/">`) {
+		t.Errorf("в сообщении о релизе нет ссылки на компонент: %s", rel)
+	}
+
+	// Мусор вместо адреса не должен уезжать в разметку.
+	bad := formatEvent(Event{Kind: KindDown, Title: "X", URL: "javascript:alert(1)"})
+	if strings.Contains(bad, "<a href") {
+		t.Errorf("недопустимая схема попала в ссылку: %s", bad)
+	}
+}
