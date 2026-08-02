@@ -402,7 +402,7 @@ func runStep(s Step, c Check, client *http.Client, vars map[string]string) resul
 	if err != nil {
 		return result{status: statusDown, errText: err.Error()}
 	}
-	req.Header.Set("User-Agent", "samoy-status-agent (+https://status.samoy.love)")
+	req.Header.Set("User-Agent", "samoylove-status-agent (+https://status.samoy.love)")
 
 	resp, err := client.Do(req)
 	if err != nil {

@@ -14,10 +14,10 @@ func sampleSummary() Summary {
 		Updated: "2026-08-02T10:00:00Z",
 		Overall: "degraded",
 		Projects: []OutProject{{
-			ID: "samoy", Title: "samoy.love", Up: 1, Total: 2,
+			ID: "samoylove", Title: "samoy.love", Up: 1, Total: 2,
 			Checks: []OutCheck{
 				{
-					ID: "samoy", Name: "Главная", Status: "up", Ms: 120, Code: 200,
+					ID: "samoylove", Name: "Главная", Status: "up", Ms: 120, Code: 200,
 					CertDays: &days,
 					Uptime:   map[string]any{"d1": float64(100), "d7": float64(99.5), "d90": nil},
 				},
@@ -36,15 +36,15 @@ func TestBuildMetricsFormat(t *testing.T) {
 
 	for _, want := range []string{
 		"# TYPE status_check_up gauge",
-		`status_check_up{project="samoy",check="samoy",name="Главная"} 1`,
-		`status_check_up{project="samoy",check="metro",name="Метро \"кошачье\""} 0`,
-		`status_check_response_seconds{project="samoy",check="samoy",name="Главная"} 0.12`,
-		`status_check_code{project="samoy",check="metro",name="Метро \"кошачье\""} 0`,
-		`status_cert_days_left{project="samoy",check="samoy"} 12`,
-		`status_check_uptime_ratio{project="samoy",check="samoy",window="d1"} 1`,
-		`status_check_uptime_ratio{project="samoy",check="samoy",window="d7"} 0.995`,
-		`status_unit_active{project="samoy",unit="nginx.service"} 1`,
-		`status_unit_active{project="samoy",unit="snakes.service"} 0`,
+		`status_check_up{project="samoylove",check="samoylove",name="Главная"} 1`,
+		`status_check_up{project="samoylove",check="metro",name="Метро \"кошачье\""} 0`,
+		`status_check_response_seconds{project="samoylove",check="samoylove",name="Главная"} 0.12`,
+		`status_check_code{project="samoylove",check="metro",name="Метро \"кошачье\""} 0`,
+		`status_cert_days_left{project="samoylove",check="samoylove"} 12`,
+		`status_check_uptime_ratio{project="samoylove",check="samoylove",window="d1"} 1`,
+		`status_check_uptime_ratio{project="samoylove",check="samoylove",window="d7"} 0.995`,
+		`status_unit_active{project="samoylove",unit="nginx.service"} 1`,
+		`status_unit_active{project="samoylove",unit="snakes.service"} 0`,
 		"status_checks_total 2",
 		"status_checks_up 1",
 		"status_agent_run_timestamp_seconds 1754128800",
@@ -85,8 +85,8 @@ func TestBuildMetricsHelpOncePerFamily(t *testing.T) {
 func TestBuildMetricsIncidents(t *testing.T) {
 	incidents := []Incident{
 		{Service: "metro", Start: "2026-08-02T09:00:00Z"}, // открытый
-		{Service: "samoy", Start: "2026-08-01T09:00:00Z", End: "2026-08-01T09:05:00Z", DurationMs: 300000},
-		{Service: "samoy", Start: "2026-07-01T09:00:00Z", End: "2026-07-01T09:01:00Z", DurationMs: 60000},
+		{Service: "samoylove", Start: "2026-08-01T09:00:00Z", End: "2026-08-01T09:05:00Z", DurationMs: 300000},
+		{Service: "samoylove", Start: "2026-07-01T09:00:00Z", End: "2026-07-01T09:01:00Z", DurationMs: 60000},
 	}
 	out := buildMetrics(sampleSummary(), incidents, time.Second, time.Now())
 
@@ -94,7 +94,7 @@ func TestBuildMetricsIncidents(t *testing.T) {
 		"status_incidents_open 1",
 		"status_incidents_recorded 3",
 		// Берётся ПЕРВЫЙ закрытый: журнал отсортирован от свежих к старым.
-		`status_incident_last_duration_seconds{service="samoy"} 300`,
+		`status_incident_last_duration_seconds{service="samoylove"} 300`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("нет строки %q в:\n%s", want, out)

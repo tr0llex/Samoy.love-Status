@@ -205,7 +205,7 @@ docs/                выкатка и описание конфига
 Тот же обход агент выгружает в формате Prometheus — файлом
 `/var/lib/node_exporter/textfile/status-agent.prom` (путь меняется флагом
 `-metrics`, пустое значение выключает выгрузку). Читает его textfile-коллектор
-node_exporter из `samoy-monitoring`; наружу ничего не открывается — ни порта,
+node_exporter из `metrics.samoy.love`; наружу ничего не открывается — ни порта,
 ни маршрута в nginx.
 
 HTTP-эндпоинта нет намеренно: агент — oneshot по таймеру, между запусками
@@ -289,6 +289,11 @@ npm run e2e:prod                          # https://status.samoy.love
 
 - [docs/CONFIG.md](docs/CONFIG.md) — как описывается проверка и что настроено сейчас
 - [docs/DEPLOY.md](docs/DEPLOY.md) — выкатка, первичная настройка, локальный запуск
+
+Рядом живёт [metrics.samoy.love](https://github.com/tr0llex/metrics.samoy.love)
+— мониторинг того же хозяйства. Разделение простое: статус-страница смотрит
+наружу, для посетителей; мониторинг — внутрь, для владельца. Агент отсюда
+отдаёт туда метрики через textfile-коллектор node_exporter.
 
 Репозиторий читательский: это личная инфраструктура, PR не ожидаются. Вопросы
 и замечания — [alex@samoy.love](mailto:alex@samoy.love).

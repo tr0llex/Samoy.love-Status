@@ -6,18 +6,18 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=samoy-bot
-Group=samoy-bot
+User=samoylove-bot
+Group=samoylove-bot
 
 # Токен и chat id — только здесь. Файл принадлежит root с правами 0600:
 # EnvironmentFile читает systemd до смены пользователя, поэтому самому боту
 # доступ к секрету не нужен.
-EnvironmentFile=/etc/samoy-bot/env
+EnvironmentFile=/etc/samoylove-bot/env
 
 # Путь через симлинк current: выкатка переключает его атомарно.
-ExecStart=/opt/samoy-bot/current/samoy-bot \
+ExecStart=/opt/samoylove-bot/current/samoylove-bot \
     -data /var/www/status/data \
-    -state /var/lib/samoy-bot/state.json
+    -state /var/lib/samoylove-bot/state.json
 
 # Бот обязан пережить перезапуск: он же и есть канал, по которому владелец
 # узнаёт о сбоях. Молчащий бот выглядит как «всё хорошо».
@@ -37,7 +37,7 @@ ProtectControlGroups=true
 RestrictSUIDSGID=true
 RestrictRealtime=true
 ReadOnlyPaths=/var/www/status/data
-ReadWritePaths=/var/lib/samoy-bot
+ReadWritePaths=/var/lib/samoylove-bot
 
 [Install]
 WantedBy=multi-user.target

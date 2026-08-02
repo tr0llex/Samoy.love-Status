@@ -101,7 +101,7 @@ async function runStep(step, check, vars) {
     const res = await fetch(raw, {
       signal: ctrl.signal,
       redirect: 'follow',
-      headers: { 'user-agent': 'samoy-status-probe (+https://status.samoy.love)' },
+      headers: { 'user-agent': 'samoylove-status-probe (+https://status.samoy.love)' },
     });
 
     if (res.status !== expect) {

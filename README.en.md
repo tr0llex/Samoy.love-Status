@@ -170,6 +170,11 @@ Deployment, provisioning and the check configuration reference are documented
 in Russian only: [docs/DEPLOY.md](docs/DEPLOY.md),
 [docs/CONFIG.md](docs/CONFIG.md).
 
+Next door lives [metrics.samoy.love](https://github.com/tr0llex/metrics.samoy.love),
+the monitoring for the same household. The split is simple: the status page
+looks outward, for visitors; monitoring looks inward, for the owner. The agent
+here hands its metrics over through the node_exporter textfile collector.
+
 This repository is meant for reading: it is personal infrastructure, and pull
 requests are not expected. Questions and remarks —
 [alex@samoy.love](mailto:alex@samoy.love).

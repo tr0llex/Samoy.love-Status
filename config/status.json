@@ -155,14 +155,14 @@
       ]
     },
     {
-      "id": "samoy",
+      "id": "samoylove",
       "title": "samoy.love",
       "subtitle": "Личная страница и витрина проектов",
       "url": "https://samoy.love",
       "accent": "oklch(0.78 0.16 195)",
       "checks": [
         {
-          "id": "samoy",
+          "id": "samoylove",
           "name": "Сайт",
           "impact": "Личная страница и витрина проектов не открываются",
           "url": "https://samoy.love/",

@@ -11,7 +11,7 @@
 задевает ни то, ни другое.
 
 ```bash
-dk deploy status-site status-agent samoy-bot   # локально, тем же путём, что и CI
+dk deploy status-site status-agent samoylove-bot   # локально, тем же путём, что и CI
 dk rollback status-site --list
 ```
 
@@ -42,29 +42,29 @@ sudo certbot certonly --webroot -w /var/www/status-acme -d status.samoy.love
 и юнит закрепляет это через `ReadOnlyPaths`.
 
 ```bash
-sudo useradd --system --no-create-home --shell /usr/sbin/nologin samoy-bot
-sudo install -d -m 0755 -o samoy-bot -g samoy-bot /var/lib/samoy-bot
-sudo install -d -m 0755 /etc/samoy-bot
-sudo install -m 0600 /dev/null /etc/samoy-bot/env   # дальше вписать токен и chat id
-sudo install -m 0644 deploy/systemd/samoy-bot.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now samoy-bot.service
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin samoylove-bot
+sudo install -d -m 0755 -o samoylove-bot -g samoylove-bot /var/lib/samoylove-bot
+sudo install -d -m 0755 /etc/samoylove-bot
+sudo install -m 0600 /dev/null /etc/samoylove-bot/env   # дальше вписать токен и chat id
+sudo install -m 0644 deploy/systemd/samoylove-bot.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now samoylove-bot.service
 ```
 
 ## Бот: секреты и проверка канала
 
-Токен и chat id — в `/etc/samoy-bot/env` (0600, root), образец:
-`deploy/samoy-bot.env.example`. В репозитории значений нет.
+Токен и chat id — в `/etc/samoylove-bot/env` (0600, root), образец:
+`deploy/samoylove-bot.env.example`. В репозитории значений нет.
 
 История уведомлений и `offset` Telegram лежат в
-`/var/lib/samoy-bot/state.json` — перезапуск службы не превращается в
+`/var/lib/samoylove-bot/state.json` — перезапуск службы не превращается в
 повторную рассылку обо всём, что лежит.
 
 Проверить канал после выкатки:
 
 ```bash
-sudo systemd-run --pipe --uid=samoy-bot \
-  --property=EnvironmentFile=/etc/samoy-bot/env \
-  /opt/samoy-bot/current/samoy-bot -selftest
+sudo systemd-run --pipe --uid=samoylove-bot \
+  --property=EnvironmentFile=/etc/samoylove-bot/env \
+  /opt/samoylove-bot/current/samoylove-bot -selftest
 ```
 
 Придёт та же сводка, что и по `/status`. Молчащий бот неотличим от

@@ -32,7 +32,7 @@ import (
 )
 
 // defaultMetricsPath — каталог, который читает textfile-коллектор
-// node_exporter (см. samoy-monitoring/docker-compose.yml).
+// node_exporter (см. metrics.samoy.love/docker-compose.yml).
 const defaultMetricsPath = "/var/lib/node_exporter/textfile/status-agent.prom"
 
 // promFile собирает документ формата exposition 0.0.4.

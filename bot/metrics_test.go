@@ -9,7 +9,7 @@ import (
 )
 
 func TestBotMetricsCountersAndFormat(t *testing.T) {
-	m := newBotMetrics(filepath.Join(t.TempDir(), "samoy-bot.prom"), time.Unix(1000, 0))
+	m := newBotMetrics(filepath.Join(t.TempDir(), "samoylove-bot.prom"), time.Unix(1000, 0))
 	now := time.Unix(2000, 0)
 
 	m.notified(string(KindDown), now)
@@ -61,7 +61,7 @@ func TestBotMetricsNilIsSafe(t *testing.T) {
 }
 
 func TestBotMetricsFlushIsAtomic(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sub", "samoy-bot.prom")
+	path := filepath.Join(t.TempDir(), "sub", "samoylove-bot.prom")
 	m := newBotMetrics(path, time.Unix(1000, 0))
 	m.notified("up", time.Unix(1100, 0))
 

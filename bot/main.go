@@ -50,7 +50,7 @@ func envDuration(name string, def time.Duration) time.Duration {
 
 func main() {
 	dataDir := flag.String("data", "/var/www/status/data", "каталог с данными агента")
-	statePath := flag.String("state", "/var/lib/samoy-bot/state.json", "файл состояния бота")
+	statePath := flag.String("state", "/var/lib/samoylove-bot/state.json", "файл состояния бота")
 	remind := flag.Duration("remind", envDuration("REMIND_INTERVAL", 15*time.Minute),
 		"как часто напоминать о продолжающемся простое")
 	watch := flag.Duration("watch", envDuration("WATCH_INTERVAL", 30*time.Second),

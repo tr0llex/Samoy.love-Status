@@ -35,7 +35,7 @@ import (
 )
 
 // defaultBotMetricsPath — каталог textfile-коллектора node_exporter.
-const defaultBotMetricsPath = "/var/lib/node_exporter/textfile/samoy-bot.prom"
+const defaultBotMetricsPath = "/var/lib/node_exporter/textfile/samoylove-bot.prom"
 
 // botMetrics — счётчики одного процесса.
 //
