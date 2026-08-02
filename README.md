@@ -8,12 +8,17 @@
 
 ## Как устроено
 
-Две независимые части, каждая делает то, чего не может другая.
+Три части, каждая делает то, чего не могут остальные.
 
 **Агент на сервере** (`agent/`, Go) — раз в минуту обходит сервисы, читает
 состояние systemd-юнитов и даты выкаток, копит историю и складывает готовый
 JSON рядом со страницей. Он живёт на том же хосте, что и сами сервисы: только
 так видно юниты и версии — но при падении хоста страница будет недоступна.
+
+**Бот** (`bot/`, Go) — отвечает владельцу в Telegram на команды и сам сообщает
+о падениях, восстановлениях и новых версиях. Своих проверок не делает: читает
+тот же `summary.json`, что и страница. Два независимых обхода расходились бы
+во времени, и решать, кому верить, пришлось бы человеку.
 
 **Внешний сторож** (`scripts/probe.mjs`, GitHub Actions) — обходит те же
 эндпоинты снаружи и пишет в Telegram при смене состояния. Это единственное,
@@ -21,8 +26,9 @@ JSON рядом со страницей. Он живёт на том же хос
 
 ```
 agent/main.go        агент: проверки, systemd, версии, история
+bot/                 телеграм-бот: команды и уведомления
 config/status.json   единый конфиг для агента и сторожа
-deploy/              nginx, systemd-юнит и таймер
+deploy/              nginx, systemd-юниты и таймер
 scripts/probe.mjs    внешний сторож (только уведомления)
 src/                 страница (Astro)
 ```
@@ -57,14 +63,51 @@ HTTP-эндпоинта нет намеренно: агент — oneshot по �
 Там, где сервис такого файла не отдаёт (бинари админки лаунчера), версия
 читается из имени каталога релиза.
 
-## Выкатка
+## Бот
 
-Общим пайплайном [deploy-kit](https://github.com/tr0llex/deploy-kit). Две
-независимые цели: страница и агент. Правка страницы не перезапускает сбор
-метрик, обновление агента не ждёт пересборки статики.
+**https://t.me/samoy_love_bot** — отвечает только владельцу, чужие сообщения
+игнорирует молча: любой ответ незнакомцу подтверждает, что бот жив и слушает.
+
+```
+/status      что живо, что лежит, аптайм за сутки, состояние юнитов
+/versions    версии сервисов и страниц со временем сборки
+/incidents   последние падения
+/help        справка
+```
+
+Сам пишет, когда проверка или юнит упали, когда поднялись (с длительностью
+простоя) и когда сменилась версия. Одно и то же состояние не повторяется, но
+о продолжающемся простое напоминает раз в `REMIND_INTERVAL` (по умолчанию 15
+минут). Отдельно сообщает, если данные агента перестали обновляться: замерший
+агент оставляет все проверки зелёными навсегда.
+
+История уведомлений и `offset` Telegram лежат в `/var/lib/samoy-bot/state.json`
+— перезапуск службы не превращается в повторную рассылку обо всём, что лежит.
+
+Токен и chat id — в `/etc/samoy-bot/env` (0600, root), образец:
+`deploy/samoy-bot.env.example`. В репозитории значений нет.
+
+Проверить канал после выкатки:
 
 ```bash
-dk deploy status-site status-agent   # локально, тем же путём, что и CI
+sudo systemd-run --pipe --uid=samoy-bot \
+  --property=EnvironmentFile=/etc/samoy-bot/env \
+  /opt/samoy-bot/current/samoy-bot -selftest
+```
+
+Придёт та же сводка, что и по `/status`. Молчащий бот неотличим от
+работающего, пока что-нибудь не упадёт, — а выяснять это в момент аварии
+поздно.
+
+## Выкатка
+
+Общим пайплайном [deploy-kit](https://github.com/tr0llex/deploy-kit). Три
+независимые цели: страница, агент и бот. Правка страницы не перезапускает сбор
+метрик, обновление агента не ждёт пересборки статики, перезапуск бота не
+задевает ни то, ни другое.
+
+```bash
+dk deploy status-site status-agent samoy-bot   # локально, тем же путём, что и CI
 dk rollback status-site --list
 ```
 
@@ -91,6 +134,17 @@ sudo systemctl daemon-reload && sudo systemctl enable --now status-agent.timer
 sudo certbot certonly --webroot -w /var/www/status-acme -d status.samoy.love
 ```
 
+Бот (отдельный пользователь: данные статуса ему нужны только на чтение):
+
+```bash
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin samoy-bot
+sudo install -d -m 0755 -o samoy-bot -g samoy-bot /var/lib/samoy-bot
+sudo install -d -m 0755 /etc/samoy-bot
+sudo install -m 0600 /dev/null /etc/samoy-bot/env   # дальше вписать токен и chat id
+sudo install -m 0644 deploy/systemd/samoy-bot.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now samoy-bot.service
+```
+
 ## Внешний сторож
 
 Пробер `probe.yml` ходит по сервисам из GitHub Actions, а не с сервера, — и это
@@ -108,6 +162,10 @@ npm install
 npm run dev
 npm run e2e            # сквозные тесты по локальной сборке
 cd agent && go run . -config ../config/status.json -data ../tmp-data
+
+# Боту нужны токен и chat id в окружении и данные, собранные агентом.
+cd bot && TELEGRAM_BOT_TOKEN=… TELEGRAM_CHAT_ID=… \
+  go run . -data ../tmp-data -state ../tmp-data/bot-state.json
 ```
 
 ## Сквозные тесты
