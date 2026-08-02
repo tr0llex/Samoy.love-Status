@@ -1,0 +1,58 @@
+name: Покрытие main
+
+# ЗАЧЕМ ОТДЕЛЬНЫЙ ВОРКФЛОУ, А НЕ ШАГ В ci.yml.
+#
+# Codecov привязывает отчёт к КОММИТУ, а бейдж и «project»-статус считает по
+# ветке по умолчанию. Отчёты из ci.yml приходят на коммиты веток PR — для main
+# они не приезжают никогда, потому что ci.yml намеренно ходит только по
+# pull_request (см. комментарий к его триггеру).
+#
+# Пока этого файла не было, данные main стояли на месте: бейдж в README
+# показывал цифру того дня, когда CI последний раз запускался на push в main.
+# Бейдж покрытия, который не обновляется, — ровно то «украшение, которое
+# врёт», от которого его и заводили.
+#
+# Возвращать `push: branches: [main]` в ci.yml было бы дороже: там ещё линтеры,
+# сборка и сквозные тесты — всё это уже отработало на PR и на том же дереве.
+# Здесь только то, что даёт цифру, и команды те же самые: иначе сравнение
+# «PR против main» перестаёт что-либо значить.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Мержи иногда идут подряд; предыдущий счёт не нужен, важен последний main.
+concurrency:
+  group: coverage-main
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    name: Покрытие main в Codecov
+    runs-on: ubuntu-latest
+    # Агент и бот — два независимых модуля и два флага. Оба обязаны приехать,
+    # иначе на main окажется половина картины, и сравнение с PR поедет.
+    strategy:
+      matrix:
+        include:
+          - module: agent
+          - module: bot
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+      - name: Тесты
+        working-directory: ${{ matrix.module }}
+        run: go test ./... -race -coverprofile=coverage.out -covermode=atomic
+      - name: Отправить покрытие в Codecov
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: ${{ matrix.module }}/coverage.out
+          flags: ${{ matrix.module }}
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
