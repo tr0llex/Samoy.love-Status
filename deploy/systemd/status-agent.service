@@ -10,7 +10,10 @@ User=status
 Group=status
 # Путь через симлинк current: выкатка переключает его атомарно, и следующий
 # запуск таймера подхватывает новую версию без правки юнита.
-ExecStart=/opt/status-agent/current/status-agent -config /etc/status-agent/status.json -data /var/www/status/data
+# Конфиг берётся из релиза, а не из /etc: он часть кода и должен меняться
+# вместе с ним. Отдельная копия в /etc молча отставала — заметить это можно
+# было только по пустому impact на странице.
+ExecStart=/opt/status-agent/current/status-agent -config /opt/status-agent/current/status.json -data /var/www/status/data
 
 # Root не нужен: systemctl show читается любым пользователем, каталоги релизов
 # открыты на чтение. Пишем строго в два каталога: данные страницы и .prom для

@@ -29,9 +29,8 @@ dk rollback status-site --list
 
 ```bash
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin status
-sudo mkdir -p /var/www/status/data /var/www/status-acme /etc/status-agent
+sudo mkdir -p /var/www/status/data /var/www/status-acme
 sudo chown -R status:status /var/www/status/data
-sudo install -m 0644 config/status.json /etc/status-agent/status.json
 sudo install -m 0644 deploy/systemd/status-agent.{service,timer} /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now status-agent.timer
 
@@ -48,6 +47,20 @@ sudo install -d -m 0755 /etc/samoylove-bot
 sudo install -m 0600 /dev/null /etc/samoylove-bot/env   # дальше вписать токен и chat id
 sudo install -m 0644 deploy/systemd/samoylove-bot.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now samoylove-bot.service
+```
+
+## Конфиг проверок едет с релизом
+
+`config/status.json` попадает в артефакт выкатки и лежит рядом с бинарником:
+`/opt/status-agent/current/status.json`. Отдельной копии в `/etc` больше нет —
+она молча отставала, и заметить это можно было только по пустому `impact` на
+странице.
+
+Если старая копия осталась на хосте, её можно убрать: агент её больше не
+читает.
+
+```bash
+sudo rm -rf /etc/status-agent
 ```
 
 ## Переезд бота на новое имя (один раз)
