@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 200" width="1400" height="200" role="img" aria-label="Здесь кроп шкалы за 90 дней">
+  <style>
+    .bg { fill: #17191c }
+    .fr { fill: none; stroke: #3a3f47; stroke-width: 2; stroke-dasharray: 10 8; rx: 14 }
+    .t  { fill: #e8eaed; font: 600 22px system-ui, sans-serif; text-anchor: middle }
+    .d  { fill: #8b9199; font: 15px system-ui, sans-serif; text-anchor: middle }
+  </style>
+  <rect class="bg" width="1400" height="200" rx="14"/>
+  <rect class="fr" x="10" y="10" width="1380" height="180"/>
+  <text x="700" y="86" class="t">Здесь кроп шкалы за 90 дней</text>
+  <text x="700" y="116" class="d">В кадре одновременно: сплошные зелёные дни, ступень,</text>
+    <text x="700" y="142" class="d">красный день и дырка «нет данных».</text>
+</svg>

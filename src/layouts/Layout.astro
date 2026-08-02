@@ -21,6 +21,13 @@ const { title, description } = Astro.props;
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
+    <meta property="og:url" content={Astro.site?.href ?? 'https://status.samoy.love/'} />
+    {/* Ссылку на страницу кидает собственный бот — без картинки превью в
+        Telegram было пустым. Адрес абсолютный: относительный там не работает. */}
+    <meta property="og:image" content={new URL('/og.png', Astro.site ?? 'https://status.samoy.love').href} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
     <meta name="theme-color" content="#f7f7f8" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#191c24" media="(prefers-color-scheme: dark)" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />

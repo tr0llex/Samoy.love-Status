@@ -29,6 +29,8 @@ domain on a single host, and this page watches them:
 | **MetroKit**   | [metro.samoy.love](https://metro.samoy.love)       | offline PWA with the Moscow metro map               |
 | **samoy.love** | [samoy.love](https://samoy.love)                   | personal page and project showcase                  |
 
+<img src="docs/img/page.svg" alt="Status page" width="100%">
+
 ## How it works
 
 ```mermaid
@@ -134,6 +136,8 @@ The daily bar has gradations rather than just "100% / 0% / everything else": a
 day with a single failed minute out of 1440 and a day that was down for half
 its length no longer look the same.
 
+<img src="docs/img/uptime.svg" alt="90-day availability bar" width="100%">
+
 ### Stale data
 
 If `updated` in `summary.json` is older than five minutes, the page says the
@@ -155,6 +159,8 @@ server was down that day, the day is bad even though the site was up.
 (`src/pages/tg.astro`), not a shrunken copy of the big one. It picks up the
 user's Telegram theme. The logic of what the data means is shared with the
 full page (`src/lib/status.ts`), so the verdicts cannot drift apart.
+
+<img src="docs/img/telegram.svg" alt="Bot and mini app" width="380">
 
 ## Further reading
 

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 620" width="760" height="620" role="img" aria-label="Здесь бот и мини-приложение">
+  <style>
+    .bg { fill: #17191c }
+    .fr { fill: none; stroke: #3a3f47; stroke-width: 2; stroke-dasharray: 10 8; rx: 14 }
+    .t  { fill: #e8eaed; font: 600 22px system-ui, sans-serif; text-anchor: middle }
+    .d  { fill: #8b9199; font: 15px system-ui, sans-serif; text-anchor: middle }
+  </style>
+  <rect class="bg" width="760" height="620" rx="14"/>
+  <rect class="fr" x="10" y="10" width="740" height="600"/>
+  <text x="380" y="296" class="t">Здесь бот и мини-приложение</text>
+  <text x="380" y="326" class="d">Слева — карточка /status с кнопками и полоской.</text>
+    <text x="380" y="352" class="d">Справа — мини-приложение в тёмной теме Telegram.</text>
+</svg>
