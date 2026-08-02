@@ -13,7 +13,11 @@ Group=status
 ExecStart=/opt/status-agent/current/status-agent -config /etc/status-agent/status.json -data /var/www/status/data
 
 # Root не нужен: systemctl show читается любым пользователем, каталоги релизов
-# открыты на чтение. Пишем строго в один каталог.
+# открыты на чтение. Пишем строго в два каталога: данные страницы и .prom для
+# node_exporter. Второй легко забыть — ProtectSystem=strict не роняет запуск,
+# а лишь возвращает «read-only file system» при записи, и агент честно пишет
+# это в журнал, продолжая работать. Метрик при этом нет, а правило
+# StatusAgentStale молчит, потому что метрики, которой нет, не бывает старой.
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
@@ -21,7 +25,7 @@ PrivateTmp=true
 ProtectKernelTunables=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
-ReadWritePaths=/var/www/status/data
+ReadWritePaths=/var/www/status/data /var/lib/node_exporter/textfile
 
 # Обход всех проверок укладывается в секунды; если что-то залипло — лучше
 # прибить, чем копить параллельные запуски раз в минуту.

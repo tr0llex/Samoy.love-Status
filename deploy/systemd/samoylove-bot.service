@@ -15,9 +15,11 @@ Group=samoylove-bot
 EnvironmentFile=/etc/samoylove-bot/env
 
 # Путь через симлинк current: выкатка переключает его атомарно.
-ExecStart=/opt/samoylove-bot/current/samoylove-bot \
-    -data /var/www/status/data \
-    -state /var/lib/samoylove-bot/state.json
+#
+# Аргументов нет намеренно: все настройки бота живут в одном месте — в
+# EnvironmentFile выше. Раньше половина задавалась здесь флагами, половина
+# переменными, и по строке запуска нельзя было понять, что победит.
+ExecStart=/opt/samoylove-bot/current/samoylove-bot
 
 # Бот обязан пережить перезапуск: он же и есть канал, по которому владелец
 # узнаёт о сбоях. Молчащий бот выглядит как «всё хорошо».
@@ -25,7 +27,11 @@ Restart=always
 RestartSec=5
 
 # Данные агента нужны только на чтение: бот их пересказывает, а не правит.
-# Своё состояние (offset и история уведомлений) пишет в отдельный каталог.
+# Своё состояние (offset и история уведомлений) пишет в отдельный каталог,
+# а метрики — в textfile для node_exporter. Второй путь легко забыть:
+# ProtectSystem=strict не роняет запуск, а лишь отвечает «read-only file
+# system» на запись, бот пишет это в журнал и работает дальше. Метрик при
+# этом нет, и StatusBotStale молчит — метрика, которой нет, не устаревает.
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
@@ -37,7 +43,7 @@ ProtectControlGroups=true
 RestrictSUIDSGID=true
 RestrictRealtime=true
 ReadOnlyPaths=/var/www/status/data
-ReadWritePaths=/var/lib/samoylove-bot
+ReadWritePaths=/var/lib/samoylove-bot /var/lib/node_exporter/textfile
 
 [Install]
 WantedBy=multi-user.target
