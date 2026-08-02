@@ -852,28 +852,15 @@ func main() {
 		since := now.Format(time.RFC3339)
 		if prev != nil && prev.Status == status {
 			since = prev.Since
-		} else if prev != nil {
-			// Инцидент — только про недоступность. Переход «работает» →
-			// «медленно» состояние меняет, но инцидентом не является, иначе
-			// история засорится деградациями и в ней утонут настоящие падения.
-			full := j.project.Title + " · " + j.check.Name
-			switch {
-			case status == statusDown:
-				incidents = append([]Incident{{
-					Service: id, Name: full, Start: since,
-					Reason: firstNonEmpty(r.errText, "недоступен"),
-				}}, incidents...)
-			case prev.Status == statusDown:
-				for k := range incidents {
-					if incidents[k].Service == id && incidents[k].End == "" {
-						incidents[k].End = since
-						if t0, err := time.Parse(time.RFC3339, incidents[k].Start); err == nil {
-							incidents[k].DurationMs = now.Sub(t0).Milliseconds()
-						}
-						break
-					}
-				}
-			}
+		} else {
+			incidents = applyIncident(incidents, incidentChange{
+				id:      id,
+				name:    j.project.Title + " · " + j.check.Name,
+				prev:    prev,
+				status:  status,
+				errText: r.errText,
+				at:      since,
+			}, now)
 		}
 		state.Services[id] = &CheckState{
 			Status: status, Since: since, Ms: r.ms, Code: r.code, CertDays: r.certDays,
@@ -1000,6 +987,54 @@ func main() {
 	if err := writeMetrics(*metricsPath, buildMetrics(out, incidents, time.Since(runStart), now)); err != nil {
 		log.Printf("метрики не записаны (%s): %v", *metricsPath, err)
 	}
+}
+
+// incidentChange — смена состояния одной проверки, из которой рождается или
+// закрывается инцидент.
+type incidentChange struct {
+	id      string
+	name    string
+	prev    *CheckState
+	status  string
+	errText string
+	at      string
+}
+
+// applyIncident ведёт историю падений.
+//
+// Инцидент — только про недоступность. Переход «работает» → «медленно»
+// состояние меняет, но инцидентом не является: иначе история засорится
+// деградациями и в ней утонут настоящие падения.
+//
+// Первое наблюдение (prev == nil) лежащей проверки инцидент ОТКРЫВАЕТ. Раньше
+// оно молчало, и падение, заставшее агента без истории — первый запуск, новый
+// сервер, вычищенный data/, — не попадало в историю вовсе: до самого
+// восстановления его как будто не было. Бот в такой ситуации владельцу пишет
+// (см. bot/watch.go, ветка !seen), и молчащая при этом страница ему
+// противоречила.
+func applyIncident(incidents []Incident, c incidentChange, now time.Time) []Incident {
+	switch {
+	case c.status == statusDown && (c.prev == nil || c.prev.Status != statusDown):
+		return append([]Incident{{
+			Service: c.id, Name: c.name, Start: c.at,
+			Reason: firstNonEmpty(c.errText, "недоступен"),
+		}}, incidents...)
+
+	case c.prev != nil && c.prev.Status == statusDown && c.status != statusDown:
+		// Закрываем самый свежий незакрытый инцидент этой проверки: список
+		// отсортирован по убыванию времени начала, поэтому первый найденный
+		// он и есть.
+		for k := range incidents {
+			if incidents[k].Service == c.id && incidents[k].End == "" {
+				incidents[k].End = c.at
+				if t0, err := time.Parse(time.RFC3339, incidents[k].Start); err == nil {
+					incidents[k].DurationMs = now.Sub(t0).Milliseconds()
+				}
+				break
+			}
+		}
+	}
+	return incidents
 }
 
 // projectStatus — вердикт по критичным проверкам и состоянию служб.
