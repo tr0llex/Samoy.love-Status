@@ -1,3 +1,3 @@
-module github.com/tr0llex/samoylove-status/agent
+module github.com/tr0llex/status.samoy.love/agent
 
 go 1.25
