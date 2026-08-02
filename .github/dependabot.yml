@@ -12,36 +12,35 @@ version: 2
 # человеческих.
 
 updates:
-
-  - package-ecosystem: "github-actions"
-    directory: "/"
+  - package-ecosystem: 'github-actions'
+    directory: '/'
     schedule:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
     commit-message:
-      prefix: "deps"
-  - package-ecosystem: "npm"
-    directory: "/"
+      prefix: 'deps'
+  - package-ecosystem: 'npm'
+    directory: '/'
     schedule:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
     commit-message:
-      prefix: "deps"
-  - package-ecosystem: "gomod"
-    directory: "/agent"
+      prefix: 'deps'
+  - package-ecosystem: 'gomod'
+    directory: '/agent'
     schedule:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
     commit-message:
-      prefix: "deps"
-  - package-ecosystem: "gomod"
-    directory: "/bot"
+      prefix: 'deps'
+  - package-ecosystem: 'gomod'
+    directory: '/bot'
     schedule:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
     commit-message:
-      prefix: "deps"
+      prefix: 'deps'
