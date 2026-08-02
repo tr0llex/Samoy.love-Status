@@ -7,7 +7,15 @@
 import { test as base, expect, type Page } from '@playwright/test';
 
 /** Запросы, за которые страница не отвечает. */
-const IGNORED_URLS: RegExp[] = [];
+const IGNORED_URLS: RegExp[] = [
+  // Приёмник событий интерфейса. В проде /e/<событие> обслуживает nginx и
+  // отвечает 204; сервер предпросмотра, на котором идут эти тесты, статику
+  // отдаёт сам и о таком пути не знает — отсюда 404.
+  //
+  // Игнорируется ровно этот путь, а не любые 404: страница, потерявшая
+  // картинку или шрифт, должна валить тест по-прежнему.
+  /\/e\/[a-z][a-z0-9_]*$/,
+];
 
 /** Шум, который браузер печатает сам и который не связан с кодом страницы. */
 const IGNORED_CONSOLE: RegExp[] = [];
@@ -25,7 +33,13 @@ export function watch(page: Page): Problems {
   page.on('console', (msg) => {
     if (msg.type() !== 'error') return;
     const text = msg.text();
-    if (!ignored(IGNORED_CONSOLE, text)) problems.console.push(text);
+    if (ignored(IGNORED_CONSOLE, text)) return;
+    // «Failed to load resource» не содержит адреса в тексте — он лежит в
+    // location. Без этой проверки игнор-лист адресов не действовал бы на
+    // консоль, и отфильтрованный сетевой запрос всё равно валил бы тест.
+    const from = msg.location()?.url ?? '';
+    if (from && ignored(IGNORED_URLS, from)) return;
+    problems.console.push(text);
   });
 
   page.on('pageerror', (err) => {

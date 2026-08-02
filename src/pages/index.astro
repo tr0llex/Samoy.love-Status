@@ -102,6 +102,7 @@ const DATA_URL = import.meta.env.PUBLIC_DATA_URL ?? '/data/summary.json';
     troubles,
     uptimeOf,
   } from '../lib/status';
+  import { trackEvent } from '../lib/events';
 
   // Путь к данным приходит атрибутом, а не через define:vars: с define:vars
   // Astro обязан отдать скрипт инлайном и без обработки, то есть без
@@ -464,6 +465,9 @@ const DATA_URL = import.meta.env.PUBLIC_DATA_URL ?? '/data/summary.json';
       const node = ev.target;
       if (node instanceof HTMLDetailsElement && node.dataset.id) {
         manuallyToggled.set(node.dataset.id, node.open);
+        // Считаем только раскрытие: закрытие — это то же самое действие,
+        // доведённое до конца, и удвоило бы счётчик.
+        if (node.open) trackEvent('check_expand');
       }
     },
     true,
