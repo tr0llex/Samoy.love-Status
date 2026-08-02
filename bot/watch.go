@@ -23,8 +23,12 @@ type Event struct {
 	Kind Kind
 	// Title и URL идут вместе: уведомление без ссылки заставляет искать адрес
 	// руками ровно тогда, когда некогда.
-	Title    string
-	URL      string
+	Title string
+	URL   string
+	// Project — id проекта, к которому относится событие. Нужен кнопке под
+	// уведомлением: она ведёт сразу в упавший проект, а не на общий экран,
+	// где о нём ещё надо вспомнить.
+	Project  string
 	Reason   string
 	Duration time.Duration
 	Version  string
@@ -104,12 +108,13 @@ func saveState(path string, st *State) error {
 // свежесть самих данных. Приводим их к общему виду, чтобы логика дедупликации
 // была одна на всех и не расползалась по трём похожим веткам.
 type target struct {
-	key    string
-	title  string
-	url    string
-	reason string
-	down   bool
-	since  time.Time
+	key     string
+	title   string
+	url     string
+	project string
+	reason  string
+	down    bool
+	since   time.Time
 }
 
 func targets(s *Summary, now time.Time, stale time.Duration) []target {
@@ -129,12 +134,13 @@ func targets(s *Summary, now time.Time, stale time.Duration) []target {
 				title += " (второстепенная)"
 			}
 			out = append(out, target{
-				key:    "check:" + c.ID,
-				title:  title,
-				url:    firstNonEmptyStr(c.URL, p.URL),
-				reason: firstNonEmptyStr(c.Impact, c.Error),
-				down:   c.Status == "down",
-				since:  since,
+				key:     "check:" + c.ID,
+				title:   title,
+				url:     firstNonEmptyStr(c.URL, p.URL),
+				project: p.ID,
+				reason:  firstNonEmptyStr(c.Impact, c.Error),
+				down:    c.Status == "down",
+				since:   since,
 			})
 		}
 		for _, u := range p.Units {
@@ -143,12 +149,13 @@ func targets(s *Summary, now time.Time, stale time.Duration) []target {
 				since = now
 			}
 			out = append(out, target{
-				key:    "unit:" + u.Name,
-				title:  p.Title + " · " + u.Title,
-				url:    p.URL,
-				reason: "состояние юнита: " + u.State,
-				down:   !u.Active,
-				since:  since,
+				key:     "unit:" + u.Name,
+				title:   p.Title + " · " + u.Title,
+				url:     p.URL,
+				project: p.ID,
+				reason:  "состояние юнита: " + u.State,
+				down:    !u.Active,
+				since:   since,
 			})
 		}
 	}
@@ -213,7 +220,8 @@ func (st *State) Apply(s *Summary, now time.Time, remind, stale time.Duration) [
 			if t.down {
 				item.Notified = now.UTC().Format(time.RFC3339)
 				events = append(events, Event{
-					Key: t.key, Kind: KindDown, Title: t.title, Reason: t.reason, At: now,
+					Key: t.key, Kind: KindDown, Title: t.title, URL: t.url,
+					Project: t.project, Reason: t.reason, At: now,
 				})
 			}
 			st.Items[t.key] = item
@@ -228,7 +236,8 @@ func (st *State) Apply(s *Summary, now time.Time, remind, stale time.Duration) [
 				kind = KindDown
 			}
 			events = append(events, Event{
-				Key: t.key, Kind: kind, Title: t.title, Reason: t.reason,
+				Key: t.key, Kind: kind, Title: t.title, URL: t.url,
+				Project: t.project, Reason: t.reason,
 				Duration: now.Sub(since), At: now,
 			})
 			prev.Down = t.down
@@ -243,7 +252,8 @@ func (st *State) Apply(s *Summary, now time.Time, remind, stale time.Duration) [
 					since = t.since
 				}
 				events = append(events, Event{
-					Key: t.key, Kind: KindStillDown, Title: t.title, Reason: t.reason,
+					Key: t.key, Kind: KindStillDown, Title: t.title, URL: t.url,
+					Project: t.project, Reason: t.reason,
 					Duration: now.Sub(since), At: now,
 				})
 				prev.Notified = now.UTC().Format(time.RFC3339)
@@ -265,6 +275,10 @@ func (st *State) Apply(s *Summary, now time.Time, remind, stale time.Duration) [
 				}
 				events = append(events, Event{
 					Key: key, Kind: KindRelease, Title: p.Title + " · " + b.Title,
+					// Ссылка на сам компонент, а не на проект целиком:
+					// обновилась конкретная часть, её и открывают.
+					URL:     firstNonEmptyStr(b.URL, p.URL),
+					Project: p.ID,
 					Version: b.Version, Previous: prev, At: at,
 				})
 			}

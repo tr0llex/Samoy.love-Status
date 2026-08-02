@@ -14,16 +14,16 @@ import (
 
 const owner = int64(173418650)
 
-// recorder — поддельный Bot API, запоминающий отправленные тексты.
+// recorder — поддельный Bot API, запоминающий отправленное целиком.
+//
+// Пишем весь запрос, а не только text: часть содержания уехала на кнопки
+// (состояние проекта нарисовано на самой кнопке), и проверка «владелец это
+// увидел» не должна зависеть от того, текст это или разметка.
 func recorder(t *testing.T, sent *[]string) *Telegram {
 	t.Helper()
 	return testBot(t, func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
-		var body struct {
-			Text string `json:"text"`
-		}
-		_ = json.Unmarshal(raw, &body)
-		*sent = append(*sent, body.Text)
+		*sent = append(*sent, string(raw))
 		_, _ = w.Write([]byte(`{"ok":true,"result":{}}`))
 	})
 }
@@ -138,4 +138,19 @@ func TestEnvDuration(t *testing.T) {
 	if got := envDuration("REMIND_INTERVAL", 15*time.Minute); got != 15*time.Minute {
 		t.Errorf("без переменной ожидали значение по умолчанию, получили %s", got)
 	}
+}
+
+// writeSummaryOf кладёт готовую сводку в файл — для экранов, которым нужен
+// не типовой набор из writeSummary, а своё состояние.
+func writeSummaryOf(t *testing.T, s *Summary) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "summary.json")
+	b, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
