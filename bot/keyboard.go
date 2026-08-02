@@ -119,6 +119,25 @@ func projectKeyboard(s *Summary, current string) *Keyboard {
 // значком помещаются без переноса.
 const projectsPerRow = 3
 
+// buttonIcon — значок для КНОПКИ проекта, и он намеренно не такой, как в тексте.
+//
+// В тексте строка идёт одна на проверку, и зелёный кружок там отмечает
+// конкретную строку. В ряду кнопок всё иначе: проектов шесть, в норме зелёные
+// все шесть, и панель превращается в стену одинаковых ярких пятен. Яркость при
+// этом ничего не сообщает — она означает «как всегда».
+//
+// Поэтому норма молчит, а значок остаётся только у того, что требует внимания:
+// одна красная кнопка среди пяти спокойных видна сразу, среди пяти
+// ярко-зелёных — нет.
+func buttonIcon(status string) string {
+	switch status {
+	case "up", "operational":
+		return ""
+	default:
+		return statusIcon(status) + " "
+	}
+}
+
 func projectRows(s *Summary, current string) [][]Button {
 	if s == nil {
 		return nil
@@ -126,7 +145,7 @@ func projectRows(s *Summary, current string) [][]Button {
 	var rows [][]Button
 	var row []Button
 	for _, p := range s.Projects {
-		label := statusIcon(p.Status) + " " + p.Title
+		label := buttonIcon(p.Status) + p.Title
 		row = append(row, Button{
 			Text:         mark(ViewProject+p.ID, current, label),
 			CallbackData: ViewProject + p.ID,
