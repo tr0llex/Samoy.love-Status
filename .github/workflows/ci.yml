@@ -180,7 +180,7 @@ jobs:
     # даже когда данных нет, скрипт упал на неожиданном поле и на экране пусто.
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
