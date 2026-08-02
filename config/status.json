@@ -168,7 +168,7 @@
           "note": "Отвечает за офлайн-режим",
           "impact": "Офлайн-режим не обновится у новых посетителей. Уже установленные копии продолжают работать",
           "//expectType": "Ловит главный тихий сбой этой проверки: SPA-фолбэк отдаёт HTML вместо скрипта, и код при этом 200.",
-          "url": "https://metro.samoy.love/kitty-metro-sw.js",
+          "url": "https://metro.samoy.love/metro-map-sw.js",
           "expect": 200,
           "critical": false,
           "slowMs": 2000,
