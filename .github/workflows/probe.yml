@@ -34,18 +34,33 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
 
+      # Пять обходов с минутным шагом вместо одного. Cron у GitHub мельче пяти
+      # минут не умеет, поэтому окно между запусками закрывается изнутри job'а:
+      # падение замечается в среднем за полминуты, а не за две с половиной.
+      # Данные пишутся каждым обходом, коммит — один в конце.
       - name: Обойти сервисы
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           NOTIFY_TEST: ${{ inputs.notify_test }}
-        run: node scripts/probe.mjs
+        run: |
+          for i in 1 2 3 4 5; do
+            echo "::group::обход $i из 5"
+            # Один упавший обход не должен съедать остальные: сеть у раннера
+            # тоже бывает мигающей, а данные важнее одной итерации.
+            node scripts/probe.mjs || echo "::warning::обход $i завершился ошибкой"
+            echo '::endgroup::'
+            # Тест-сводка нужна ровно один раз, а не пять.
+            NOTIFY_TEST=false
+            export NOTIFY_TEST
+            [ "$i" = 5 ] || sleep 60
+          done
 
       - name: Сохранить результат
         run: |
