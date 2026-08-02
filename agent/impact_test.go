@@ -434,3 +434,82 @@ func TestМёртваяСлужбаРоняетВердикт(t *testing.T) {
 		t.Errorf("общий вердикт без проверок, но с мёртвой службой: %q", got)
 	}
 }
+
+func TestЖизненныйЦиклИнцидента(t *testing.T) {
+	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
+	at := now.Format(time.RFC3339)
+
+	// Падение при первом же наблюдении обязано попасть в историю. Раньше оно
+	// молчало: инцидент открывался только при переходе из известного
+	// состояния, и падение, заставшее агента без истории, исчезало.
+	inc := applyIncident(nil, incidentChange{
+		id: "metro", name: "Метро · Расписание", prev: nil,
+		status: statusDown, errText: "connection refused", at: at,
+	}, now)
+	if len(inc) != 1 {
+		t.Fatalf("падение при первом наблюдении не записано: %+v", inc)
+	}
+	if inc[0].Reason != "connection refused" || inc[0].End != "" {
+		t.Errorf("инцидент записан неверно: %+v", inc[0])
+	}
+
+	// Повторное наблюдение того же падения второго инцидента не создаёт.
+	same := applyIncident(inc, incidentChange{
+		id: "metro", name: "Метро · Расписание",
+		prev: &CheckState{Status: statusDown}, status: statusDown, at: at,
+	}, now)
+	if len(same) != 1 {
+		t.Fatalf("повтор падения удвоил историю: %+v", same)
+	}
+
+	// Восстановление закрывает инцидент и считает длительность.
+	later := now.Add(30 * time.Minute)
+	closed := applyIncident(same, incidentChange{
+		id: "metro", name: "Метро · Расписание",
+		prev: &CheckState{Status: statusDown}, status: statusUp,
+		at: later.Format(time.RFC3339),
+	}, later)
+	if closed[0].End == "" {
+		t.Fatal("инцидент не закрыт")
+	}
+	if got := closed[0].DurationMs; got != int64(30*time.Minute/time.Millisecond) {
+		t.Errorf("длительность %d мс, ожидали 30 минут", got)
+	}
+
+	// «Медленно» — не инцидент: иначе история засорится деградациями и в ней
+	// утонут настоящие падения.
+	slow := applyIncident(nil, incidentChange{
+		id: "metro", name: "Метро · Расписание",
+		prev: &CheckState{Status: statusUp}, status: statusSlow, at: at,
+	}, now)
+	if len(slow) != 0 {
+		t.Errorf("«медленно» записано инцидентом: %+v", slow)
+	}
+
+	// Возврат из «медленно» в «работает» тоже ничего не закрывает.
+	if got := applyIncident(closed, incidentChange{
+		id: "metro", prev: &CheckState{Status: statusSlow}, status: statusUp, at: at,
+	}, now); len(got) != 1 || got[0].End != closed[0].End {
+		t.Errorf("выход из «медленно» тронул историю: %+v", got)
+	}
+}
+
+func TestИнцидентЗакрываетсяУСвоейПроверки(t *testing.T) {
+	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
+	at := now.Format(time.RFC3339)
+	incidents := []Incident{
+		{Service: "metro", Name: "Метро", Start: at},
+		{Service: "snakes", Name: "Змейки", Start: at},
+	}
+	got := applyIncident(incidents, incidentChange{
+		id: "snakes", prev: &CheckState{Status: statusDown}, status: statusUp,
+		at: now.Add(time.Hour).Format(time.RFC3339),
+	}, now.Add(time.Hour))
+
+	if got[0].End != "" {
+		t.Error("закрыт чужой инцидент")
+	}
+	if got[1].End == "" {
+		t.Error("свой инцидент не закрыт")
+	}
+}
