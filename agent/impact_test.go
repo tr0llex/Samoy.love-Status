@@ -494,6 +494,24 @@ func TestЖизненныйЦиклИнцидента(t *testing.T) {
 	}
 }
 
+func TestИмяИнцидентаБерётсяИзАктуальногоКонфига(t *testing.T) {
+	incidents := []Incident{
+		{Service: "metro-sw", Name: "Hello Kitty Метро · Service worker"},
+		{Service: "ушедшая-проверка", Name: "Что-то · Проверка"},
+	}
+	renameIncidents(incidents, map[string]string{
+		"metro-sw": "Метро · Service worker",
+	})
+
+	if got := incidents[0].Name; got != "Метро · Service worker" {
+		t.Errorf("старое название пережило переименование: %q", got)
+	}
+	// Проверки в конфиге нет — судить не по чему, оставляем записанное.
+	if got := incidents[1].Name; got != "Что-то · Проверка" {
+		t.Errorf("инцидент исчезнувшей проверки остался без имени: %q", got)
+	}
+}
+
 func TestИнцидентЗакрываетсяУСвоейПроверки(t *testing.T) {
 	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
 	at := now.Format(time.RFC3339)

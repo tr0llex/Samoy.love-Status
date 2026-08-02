@@ -855,7 +855,7 @@ func main() {
 		} else {
 			incidents = applyIncident(incidents, incidentChange{
 				id:      id,
-				name:    j.project.Title + " · " + j.check.Name,
+				name:    incidentName(j.project.Title, j.check.Name),
 				prev:    prev,
 				status:  status,
 				errText: r.errText,
@@ -899,6 +899,7 @@ func main() {
 	}
 
 	out := Summary{Updated: now.Format(time.RFC3339)}
+	names := map[string]string{}
 	for _, p := range cfg.Projects {
 		op := OutProject{
 			ID: p.ID, Title: p.Title, Subtitle: p.Subtitle, URL: p.URL, Accent: p.Accent,
@@ -909,6 +910,7 @@ func main() {
 		for _, c := range p.Checks {
 			oc := byCheckID[c.ID]
 			op.Checks = append(op.Checks, oc)
+			names[c.ID] = incidentName(p.Title, c.Name)
 			switch {
 			case !oc.Critical:
 				switch oc.Status {
@@ -952,6 +954,7 @@ func main() {
 
 	out.Overall = overallStatus(out.Projects)
 
+	renameIncidents(incidents, names)
 	sort.SliceStable(incidents, func(i, j int) bool { return incidents[i].Start > incidents[j].Start })
 	if len(incidents) > incidentsKeep {
 		incidents = incidents[:incidentsKeep]
@@ -1012,6 +1015,24 @@ type incidentChange struct {
 // восстановления его как будто не было. Бот в такой ситуации владельцу пишет
 // (см. bot/watch.go, ветка !seen), и молчащая при этом страница ему
 // противоречила.
+func incidentName(projectTitle, checkName string) string {
+	return projectTitle + " · " + checkName
+}
+
+// Имя инцидента записывается один раз, в момент падения, и живёт в
+// incidents.json до конца срока хранения. Из-за этого переименование проекта
+// или проверки оставляло в истории название, которого больше нигде нет:
+// в конфиге давно другое, а страница годами показывает старое. Показываем то,
+// как проверка называется сейчас; у исчезнувших из конфига проверок остаётся
+// записанное когда-то — иначе инцидент лишится имени вовсе.
+func renameIncidents(incidents []Incident, names map[string]string) {
+	for i := range incidents {
+		if name, ok := names[incidents[i].Service]; ok {
+			incidents[i].Name = name
+		}
+	}
+}
+
 func applyIncident(incidents []Incident, c incidentChange, now time.Time) []Incident {
 	switch {
 	case c.status == statusDown && (c.prev == nil || c.prev.Status != statusDown):
