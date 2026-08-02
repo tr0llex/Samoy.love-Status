@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 620" width="1400" height="620" role="img" aria-label="Здесь скриншот страницы">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 620" width="1400" height="620" role="img" aria-label="Screenshot placeholder">
   <style>
     .bg { fill: #17191c }
     .fr { fill: none; stroke: #3a3f47; stroke-width: 2; stroke-dasharray: 10 8; rx: 14 }
@@ -7,8 +7,8 @@
   </style>
   <rect class="bg" width="1400" height="620" rx="14"/>
   <rect class="fr" x="10" y="10" width="1380" height="600"/>
-  <text x="700" y="296" class="t">Здесь скриншот страницы</text>
-  <text x="700" y="326" class="d">Снимать в состоянии сбоя, а не когда всё зелёное:</text>
-    <text x="700" y="352" class="d">иначе не видно ни блока сломанного с текстом импакта,</text>
-    <text x="700" y="378" class="d">ни красных ячеек на шкале, ни авто-раскрытия проекта.</text>
+  <text x="700" y="288" class="t">Screenshot goes here · Здесь скриншот страницы</text>
+  <text x="700" y="322" class="d">Shoot it during an outage, not while everything is green.</text>
+  <text x="700" y="348" class="d">Снимать в состоянии сбоя, а не когда всё зелёное: иначе не видно</text>
+  <text x="700" y="374" class="d">ни блока сломанного с текстом импакта, ни красных ячеек на шкале.</text>
 </svg>
