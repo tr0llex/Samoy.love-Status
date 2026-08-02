@@ -10,8 +10,8 @@ jobs:
     name: Агент (Go)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: agent/go.mod
           cache-dependency-path: agent/go.sum
@@ -20,15 +20,51 @@ jobs:
         working-directory: agent
         run: go vet ./...
 
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          working-directory: agent
+
       - name: Тесты
         working-directory: agent
         run: go test ./... -race -coverprofile=coverage.out -covermode=atomic
 
       - name: Отправить покрытие в Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           files: agent/coverage.out
           flags: agent
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+  bot:
+    name: Бот (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: bot/go.mod
+          cache-dependency-path: bot/go.sum
+
+      - name: go vet
+        working-directory: bot
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          working-directory: bot
+
+      - name: Тесты
+        working-directory: bot
+        run: go test ./... -race -coverprofile=coverage.out -covermode=atomic
+
+      - name: Отправить покрытие в Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          files: bot/coverage.out
+          flags: bot
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
 
@@ -36,12 +72,21 @@ jobs:
     name: Страница
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - run: npm ci
+
+      # Линтеры идут до сборки: они падают за секунды, сборка — дольше.
+      - name: ESLint
+        run: npm run lint
+      - name: Формат
+        run: npm run format:check
+      - name: Типы и шаблоны
+        run: npm run check
+
       - run: npm run build
 
       # Конфиг читают и агент, и внешний сторож — синтаксическая ошибка

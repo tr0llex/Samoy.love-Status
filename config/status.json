@@ -1,29 +1,8 @@
 {
   "//": "Единый конфиг: его читают и серверный агент (agent/), и внешний пробер в GitHub Actions (scripts/probe.mjs). Порядок проектов = порядок на странице.",
+  "//признаки": "critical (по умолчанию true) — падение роняет вердикт проекта; некритичные видны, но вердикт не портят. slowMs — выше этого порога ответ считается медленным, а не сломанным (0 = без порога). bodyIncludes / expectType — что должно быть в теле и в Content-Type: код 200 сам по себе ничего не доказывает. impact — что это значит для пользователя, показывается в блоке сбоев. allowHosts — куда разрешён редирект помимо исходного хоста.",
+  "//пороги": "slowMs выставлены с запасом и требуют подстройки по накопленной статистике: занижение даст ложное «медленно», завышение — пропущенную деградацию.",
   "projects": [
-    {
-      "id": "samoy",
-      "title": "samoy.love",
-      "subtitle": "Личная страница и витрина проектов",
-      "url": "https://samoy.love",
-      "accent": "oklch(0.78 0.16 195)",
-      "checks": [
-        {
-          "id": "samoy",
-          "name": "Сайт",
-          "url": "https://samoy.love/",
-          "expect": 200,
-          "cert": "samoy.love"
-        }
-      ],
-      "builds": [
-        {
-          "title": "Сайт",
-          "type": "url",
-          "path": "https://samoy.love/version.json"
-        }
-      ]
-    },
     {
       "id": "launcher",
       "title": "ChillHub",
@@ -34,51 +13,69 @@
         {
           "id": "launcher",
           "name": "Сайт",
+          "impact": "Сайт лаунчера не открывается",
           "url": "https://launcher.samoy.love/",
           "expect": 200,
+          "critical": true,
+          "slowMs": 3000,
+          "expectType": "text/html",
+          "bodyIncludes": "</html>",
           "cert": "launcher.samoy.love"
         },
         {
           "id": "launcher-api",
           "name": "API манифестов",
           "note": "Через него лаунчер узнаёт о новых версиях",
+          "impact": "Установленные лаунчеры не увидят новых версий и не смогут обновиться",
           "url": "https://launcher.samoy.love/manifests/launcher/latest.json",
-          "expect": 200
+          "expect": 200,
+          "critical": true,
+          "slowMs": 2000,
+          "expectType": "json",
+          "bodyIncludes": "\"version\""
+        },
+        {
+          "id": "launcher-build",
+          "name": "Путь обновления клиента",
+          "note": "Два шага подряд: узнать последнюю версию и забрать её манифест",
+          "impact": "Обновление не доедет до пользователей: версия объявлена, а забрать её нечем",
+          "critical": true,
+          "slowMs": 4000,
+          "steps": [
+            {
+              "name": "последняя версия",
+              "url": "https://launcher.samoy.love/manifests/launcher/latest.json",
+              "expect": 200,
+              "capture": { "version": "version" }
+            },
+            {
+              "name": "манифест сборки",
+              "url": "https://launcher.samoy.love/manifests/launcher/{version}.json",
+              "expect": 200,
+              "bodyIncludes": "\"files\""
+            }
+          ]
         },
         {
           "id": "launcher-admin",
           "name": "API админки",
           "note": "Публикация сборок и новостей",
+          "impact": "Нельзя выложить сборку или новость. Пользователей не затрагивает — уже выложенное раздаётся как обычно",
           "url": "https://launcher.samoy.love/admin/api/health",
-          "expect": 200
+          "expect": 200,
+          "critical": false,
+          "slowMs": 2000,
+          "bodyIncludes": "ok"
         }
       ],
       "units": [
-        {
-          "name": "chillhub-api.service",
-          "title": "Публичный API"
-        },
-        {
-          "name": "chillhub-admin.service",
-          "title": "Админка"
-        }
+        { "name": "chillhub-api.service", "title": "Публичный API" },
+        { "name": "chillhub-admin.service", "title": "Админка" }
       ],
       "builds": [
-        {
-          "title": "Сайт",
-          "type": "url",
-          "path": "https://launcher.samoy.love/version.json"
-        },
-        {
-          "title": "Публичный API",
-          "type": "release",
-          "path": "/opt/chillhub-api/current"
-        },
-        {
-          "title": "Админка",
-          "type": "release",
-          "path": "/opt/chillhub-admin/current"
-        }
+        { "title": "Сайт", "type": "url", "path": "https://launcher.samoy.love/version.json" },
+        { "title": "Публичный API", "type": "release", "path": "/opt/chillhub-api/current" },
+        { "title": "Админка", "type": "release", "path": "/opt/chillhub-admin/current" }
       ]
     },
     {
@@ -92,23 +89,27 @@
           "id": "snakes-health",
           "name": "Игровой сервер",
           "note": "Без него матчи не идут",
+          "impact": "Матчи не идут: зайти в игру нельзя, текущие партии оборваны",
           "url": "https://snakes.samoy.love/healthz",
-          "expect": 200
+          "expect": 200,
+          "critical": true,
+          "slowMs": 1500,
+          "bodyIncludes": "ok"
         },
         {
           "id": "snakes",
           "name": "Клиент",
+          "impact": "Игра не открывается",
           "url": "https://snakes.samoy.love/",
           "expect": 200,
+          "critical": true,
+          "slowMs": 3000,
+          "expectType": "text/html",
+          "bodyIncludes": "</html>",
           "cert": "snakes.samoy.love"
         }
       ],
-      "units": [
-        {
-          "name": "snakes.service",
-          "title": "Игровой сервер"
-        }
-      ],
+      "units": [{ "name": "snakes.service", "title": "Игровой сервер" }],
       "builds": [
         {
           "title": "Сервер и клиент",
@@ -119,33 +120,61 @@
     },
     {
       "id": "metro",
-      "title": "Hello Kitty Метро",
-      "subtitle": "Офлайн-PWA со схемой московского метро",
+      "title": "MetroKit",
+      "subtitle": "Офлайн-схема московского метро",
       "url": "https://metro.samoy.love",
       "accent": "oklch(0.78 0.17 350)",
       "checks": [
         {
           "id": "metro",
           "name": "Сайт",
+          "impact": "Схема метро не открывается",
           "url": "https://metro.samoy.love/",
           "expect": 200,
+          "critical": true,
+          "slowMs": 3000,
+          "expectType": "text/html",
+          "bodyIncludes": "</html>",
           "cert": "metro.samoy.love"
         },
         {
           "id": "metro-sw",
           "name": "Service worker",
           "note": "Отвечает за офлайн-режим",
+          "impact": "Офлайн-режим не обновится у новых посетителей. Уже установленные копии продолжают работать",
+          "//expectType": "Ловит главный тихий сбой этой проверки: SPA-фолбэк отдаёт HTML вместо скрипта, и код при этом 200.",
           "url": "https://metro.samoy.love/kitty-metro-sw.js",
-          "expect": 200
+          "expect": 200,
+          "critical": false,
+          "slowMs": 2000,
+          "expectType": "javascript"
         }
       ],
       "builds": [
-        {
-          "title": "Сайт",
-          "type": "url",
-          "path": "https://metro.samoy.love/version.json"
-        }
+        { "title": "Сайт", "type": "url", "path": "https://metro.samoy.love/version.json" }
       ]
+    },
+    {
+      "id": "samoy",
+      "title": "samoy.love",
+      "subtitle": "Личная страница и витрина проектов",
+      "url": "https://samoy.love",
+      "accent": "oklch(0.78 0.16 195)",
+      "checks": [
+        {
+          "id": "samoy",
+          "name": "Сайт",
+          "impact": "Личная страница и витрина проектов не открываются",
+          "url": "https://samoy.love/",
+          "expect": 200,
+          "critical": true,
+          "slowMs": 3000,
+          "expectType": "text/html",
+          "bodyIncludes": "</html>",
+          "cert": "samoy.love"
+        }
+      ],
+      "builds": [{ "title": "Сайт", "type": "url", "path": "https://samoy.love/version.json" }]
     }
   ]
 }

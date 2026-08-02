@@ -1,26 +1,77 @@
-/* Токены общие с samoy.love — статус-страница выглядит частью того же хозяйства */
+/* Токены общие с samoy.love — статус-страница выглядит частью того же хозяйства.
+   Тема следует за системной: статус-страницу открывают в том числе днём с
+   телефона, и тёмный экран в упор — не то, что нужно в этот момент. */
 :root {
+  color-scheme: light dark;
+
+  /* Тёмная — она же значение по умолчанию. */
   --bg: oklch(0.13 0.015 260);
   --bg-raise: oklch(0.17 0.02 260);
+  --bg-sink: oklch(0.1 0.015 260);
   --text: oklch(0.93 0.01 260);
   --text-dim: oklch(0.68 0.015 260);
+  --text-mute: oklch(0.6 0.015 260);
   --accent: oklch(0.78 0.16 195);
   --line: color-mix(in oklch, var(--text) 12%, transparent);
+  --line-soft: color-mix(in oklch, var(--text) 7%, transparent);
 
   --up: oklch(0.78 0.17 150);
   --partial: oklch(0.8 0.16 75);
   --down: oklch(0.68 0.2 25);
-  --none: color-mix(in oklch, var(--text) 14%, transparent);
+  /* Отдельный цвет для «неизвестно»: молчание агента — это не «всё хорошо»
+     и не «всё лежит», и красить его в один из двух было бы враньём. */
+  --unknown: oklch(0.62 0.03 260);
+  --none: color-mix(in oklch, var(--text) 13%, transparent);
+
+  /* Заливке полоски хватает контраста 3:1, а тексту плашки нужно 4.5:1 —
+     на тёмном фоне это один и тот же цвет, на светлом разъезжается. */
+  --up-ink: var(--up);
+  --partial-ink: var(--partial);
+  --down-ink: var(--down);
+
+  --glow: 0.55;
 
   --font-sans: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono Variable', ui-monospace, Consolas, monospace;
+  /* Моноширинный — системный. Второй веб-шрифт стоил 52 КБ ради цифр и
+     подписей, которые системная моноширинка рисует не хуже. */
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'Segoe UI Mono', 'Roboto Mono', Consolas,
+    monospace;
+
   --radius: 14px;
-  --container: min(1000px, 92vw);
+  --radius-sm: 9px;
+  --container: min(1080px, 92vw);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: oklch(0.985 0.004 260);
+    --bg-raise: oklch(1 0 0);
+    --bg-sink: oklch(0.955 0.006 260);
+    --text: oklch(0.26 0.02 260);
+    --text-dim: oklch(0.48 0.02 260);
+    --text-mute: oklch(0.53 0.02 260);
+    --accent: oklch(0.48 0.13 195);
+    --line: color-mix(in oklch, var(--text) 15%, transparent);
+    --line-soft: color-mix(in oklch, var(--text) 8%, transparent);
+
+    --up: oklch(0.62 0.16 150);
+    --partial: oklch(0.63 0.15 75);
+    --down: oklch(0.55 0.2 25);
+    --unknown: oklch(0.58 0.03 260);
+    --none: color-mix(in oklch, var(--text) 12%, transparent);
+
+    --up-ink: oklch(0.46 0.13 150);
+    --partial-ink: oklch(0.47 0.12 75);
+    --down-ink: oklch(0.48 0.19 25);
+
+    /* На светлом фоне свечение вокруг точек выглядит грязью. */
+    --glow: 0;
+  }
 }
 
 *, *::before, *::after { box-sizing: border-box; }
 
-html { color-scheme: dark; -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; }
 
 body {
   margin: 0;
@@ -29,16 +80,29 @@ body {
   font-family: var(--font-sans);
   font-size: 16px;
   line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
-h1, h2, h3 { margin: 0; line-height: 1.2; letter-spacing: -0.02em; }
+h1, h2, h3 { margin: 0; line-height: 1.15; letter-spacing: -0.02em; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; text-underline-offset: 3px; }
 
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
 
 .container { width: var(--container); margin-inline: auto; }
-.mono { font-family: var(--font-mono); }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* Заголовок нужен программам чтения с экрана, но не глазу. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

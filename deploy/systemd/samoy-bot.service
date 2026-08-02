@@ -1,0 +1,43 @@
+[Unit]
+Description=Телеграм-бот статуса samoy.love
+Documentation=https://status.samoy.love
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=samoy-bot
+Group=samoy-bot
+
+# Токен и chat id — только здесь. Файл принадлежит root с правами 0600:
+# EnvironmentFile читает systemd до смены пользователя, поэтому самому боту
+# доступ к секрету не нужен.
+EnvironmentFile=/etc/samoy-bot/env
+
+# Путь через симлинк current: выкатка переключает его атомарно.
+ExecStart=/opt/samoy-bot/current/samoy-bot \
+    -data /var/www/status/data \
+    -state /var/lib/samoy-bot/state.json
+
+# Бот обязан пережить перезапуск: он же и есть канал, по которому владелец
+# узнаёт о сбоях. Молчащий бот выглядит как «всё хорошо».
+Restart=always
+RestartSec=5
+
+# Данные агента нужны только на чтение: бот их пересказывает, а не правит.
+# Своё состояние (offset и история уведомлений) пишет в отдельный каталог.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+ReadOnlyPaths=/var/www/status/data
+ReadWritePaths=/var/lib/samoy-bot
+
+[Install]
+WantedBy=multi-user.target

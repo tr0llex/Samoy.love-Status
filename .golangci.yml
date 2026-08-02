@@ -1,0 +1,28 @@
+# golangci-lint v2. Набор намеренно небольшой: агент — один файл без
+# зависимостей, и линтер здесь нужен, чтобы ловить необработанные ошибки и
+# мёртвый код, а не чтобы спорить о стиле.
+version: '2'
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - bodyclose
+    - errorlint
+    - misspell
+    - revive
+
+  settings:
+    errcheck:
+      # Запись истории — best-effort: упавший файл агрегата не должен ронять
+      # обход, поэтому ошибки writeJSON гасятся явным `_ =`.
+      check-blank: false
+    misspell:
+      locale: US
+
+formatters:
+  enable:
+    - gofmt
