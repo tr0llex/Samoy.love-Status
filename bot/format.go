@@ -354,29 +354,40 @@ func incidentStatus(in Incident) string {
 }
 
 // formatEvent — текст уведомления о событии.
+//
+// Порядок строк выбран под сценарий «пришло ночью, смотрю с телефона»:
+// сначала ЧТО и для кого это плохо, потом техническая причина, потом время.
+// Причина первой строкой заставляла бы разбирать «connect: connection
+// refused» до того, как понятно, надо ли вообще вставать.
 func formatEvent(e Event) string {
 	switch e.Kind {
 	case KindDown:
+		// Дальше идёт последствие для пользователя, если оно описано в
+		// конфиге, иначе техпричина.
 		s := fmt.Sprintf("%s <b>%s</b> недоступен", down, link(e.Title, e.URL))
 		if e.Reason != "" {
 			s += "\n" + esc(e.Reason)
 		}
-		return s + "\n" + fmtTime(e.At)
+		return s + "\n<i>" + fmtTime(e.At) + "</i>"
+
 	case KindStillDown:
-		s := fmt.Sprintf("%s <b>%s</b> всё ещё недоступен — %s", down, link(e.Title, e.URL), humanDur(e.Duration))
-		if e.Reason != "" {
-			s += "\n" + esc(e.Reason)
-		}
-		return s
+		// Напоминание короче первого сообщения: подробности уже приходили,
+		// здесь важно только, сколько это тянется.
+		return fmt.Sprintf("%s <b>%s</b> лежит уже %s",
+			down, link(e.Title, e.URL), humanDur(e.Duration))
+
 	case KindUp:
-		return fmt.Sprintf("%s <b>%s</b> снова работает\nпростой: %s\n%s",
-			up, esc(e.Title), humanDur(e.Duration), fmtTime(e.At))
+		return fmt.Sprintf("%s <b>%s</b> снова работает\nпростой: %s\n<i>%s</i>",
+			up, link(e.Title, e.URL), humanDur(e.Duration), fmtTime(e.At))
+
 	case KindRelease:
-		s := fmt.Sprintf("🚀 <b>%s</b> обновлён\nверсия: <code>%s</code>", link(e.Title, e.URL), esc(e.Version))
+		s := fmt.Sprintf("🚀 <b>%s</b> обновлён\n<code>%s</code>",
+			link(e.Title, e.URL), esc(e.Version))
 		if e.Previous != "" {
-			s += fmt.Sprintf(" (была <code>%s</code>)", esc(e.Previous))
+			s += fmt.Sprintf("\nбыла <code>%s</code>", esc(e.Previous))
 		}
-		return s + "\nсобрано: " + fmtTime(e.At)
+		return s + "\n<i>собрано " + fmtTime(e.At) + "</i>"
+
 	default:
 		return esc(e.Title)
 	}

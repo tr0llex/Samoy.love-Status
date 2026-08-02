@@ -182,7 +182,7 @@ func TestFormatEvent(t *testing.T) {
 		{
 			"напоминание",
 			Event{Kind: KindStillDown, Title: "Snakes · Клиент", Duration: 45 * time.Minute},
-			[]string{"всё ещё недоступен", "45 мин"},
+			[]string{"лежит уже", "45 мин"},
 		},
 		{
 			"восстановление",

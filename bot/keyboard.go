@@ -1,7 +1,5 @@
 package main
 
-import "os"
-
 // Кнопки под сообщениями.
 //
 // Инлайн-клавиатура здесь не украшение: без неё каждый повторный взгляд на
@@ -12,9 +10,27 @@ import "os"
 // callback_data ограничен 64 байтами, поэтому в него кладём короткий ключ
 // экрана, а не состояние: всё, что нужно для отрисовки, и так лежит в
 // summary.json.
-// statusPageURL — сама страница. Нужна там, где речь о ней самой: например,
-// когда бот сообщает, что данные агента перестали обновляться.
-const statusPageURL = "https://status.samoy.love/"
+// Адреса приходят из конфига (config.go) — единственного места настроек.
+// Пакетные переменные, а не параметр каждой функции: клавиатура рисуется в
+// десятке мест, и таскать через все них две строки незачем.
+var (
+	statusPageURL = "https://status.samoy.love/"
+	miniApp       = "https://status.samoy.love/tg/"
+)
+
+// applyConfig задаёт адреса один раз при старте.
+func applyConfig(c Config) {
+	statusPageURL = c.StatusURL
+	miniApp = c.MiniApp
+}
+
+// Действия под уведомлением. Ночью нужна не навигация по экранам, а способ
+// прекратить поток: сервис уже чинится, а напоминания продолжают приходить.
+const (
+	ActMute2h = "a:mute:2h"
+	ActMute8h = "a:mute:8h"
+	ActUnmute = "a:unmute"
+)
 
 const (
 	ViewStatus    = "v:status"
@@ -23,21 +39,11 @@ const (
 	ViewHelp      = "v:help"
 )
 
-// miniAppURL — адрес мини-приложения. Telegram открывает его внутри себя, без
-// перехода в браузер, и требует https. Переопределяется переменной окружения,
-// чтобы можно было проверить сборку с локального адреса через туннель.
-func miniAppURL() string {
-	if v := os.Getenv("MINIAPP_URL"); v != "" {
-		return v
-	}
-	return "https://status.samoy.love/tg/"
-}
-
 // Кнопка мини-приложения работает только в личной переписке и только по
 // https. Если адрес почему-то не https, отдаём обычную ссылку — пусть
 // откроется в браузере, но кнопка не пропадёт.
 func openButton() Button {
-	url := miniAppURL()
+	url := miniApp
 	if len(url) > 8 && url[:8] == "https://" {
 		return Button{Text: "📊 Открыть", WebApp: &WebApp{URL: url}}
 	}
@@ -67,13 +73,31 @@ func navKeyboard(current string) *Keyboard {
 	}}
 }
 
-// alertKeyboard — под уведомлением о падении. Здесь не до навигации: нужно
-// быстро посмотреть подробности или открыть страницу.
+// alertKeyboard — под уведомлением о падении.
+//
+// Здесь не до навигации: нужно понять масштаб, открыть сервис — или сказать
+// боту помолчать, пока чинишь. Без последнего владелец либо терпит
+// напоминания, либо глушит чат целиком и пропускает следующую аварию.
 func alertKeyboard() *Keyboard {
 	return &Keyboard{InlineKeyboard: [][]Button{
 		{
 			{Text: "🩺 Что сейчас", CallbackData: ViewStatus},
 			openButton(),
+		},
+		{
+			{Text: "🔕 Тихо 2 ч", CallbackData: ActMute2h},
+			{Text: "🔕 До утра", CallbackData: ActMute8h},
+		},
+	}}
+}
+
+// mutedKeyboard — под подтверждением тишины: единственное осмысленное
+// действие здесь — передумать.
+func mutedKeyboard() *Keyboard {
+	return &Keyboard{InlineKeyboard: [][]Button{
+		{
+			{Text: "🔔 Снова говорить", CallbackData: ActUnmute},
+			{Text: "🩺 Что сейчас", CallbackData: ViewStatus},
 		},
 	}}
 }

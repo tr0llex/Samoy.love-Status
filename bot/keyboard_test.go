@@ -48,11 +48,14 @@ func TestКнопкаМиниПриложенияТребуетHTTPS(t *testing.
 	// Telegram открывает мини-приложение только по https. Если адрес другой,
 	// кнопка обязана остаться, но уже обычной ссылкой — иначе она молча
 	// перестала бы работать.
-	t.Setenv("MINIAPP_URL", "https://status.samoy.love/tg/")
+	// Адрес приходит из конфига — единственного места настроек.
+	t.Cleanup(func() { applyConfig(Config{MiniApp: "https://status.samoy.love/tg/"}) })
+
+	applyConfig(Config{MiniApp: "https://status.samoy.love/tg/"})
 	if b := openButton(); b.WebApp == nil || b.URL != "" {
 		t.Errorf("для https ожидали web_app, получили %+v", b)
 	}
-	t.Setenv("MINIAPP_URL", "http://localhost:4331/tg/")
+	applyConfig(Config{MiniApp: "http://localhost:4331/tg/"})
 	if b := openButton(); b.WebApp != nil || b.URL == "" {
 		t.Errorf("для http ожидали обычную ссылку, получили %+v", b)
 	}

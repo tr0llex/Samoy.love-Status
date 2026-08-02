@@ -49,9 +49,16 @@ type Item struct {
 // про версии, которые сменились, пока бота не было.
 type State struct {
 	// Offset — с какого update_id продолжать длинный опрос Telegram.
-	Offset   int64             `json:"offset"`
-	Items    map[string]*Item  `json:"items"`
-	Versions map[string]string `json:"versions"`
+	Offset int64 `json:"offset"`
+	// MutedUntil — до какого момента молчать о падениях.
+	//
+	// Ночью, когда сервис лежит и чинится, напоминания раз в 15 минут ничего
+	// не добавляют, но мешают. Тишина ограничена по времени намеренно:
+	// «выключить навсегда» превращает бота в неработающий, о чём вспоминают
+	// в следующую аварию.
+	MutedUntil string            `json:"mutedUntil,omitempty"`
+	Items      map[string]*Item  `json:"items"`
+	Versions   map[string]string `json:"versions"`
 }
 
 func newState() *State {
@@ -179,6 +186,22 @@ func targets(s *Summary, now time.Time, stale time.Duration) []target {
 //     remind — иначе при часовом падении придёт сотня одинаковых строк;
 //   - версия при первом наблюдении запоминается молча: бот не должен
 //     объявлять релизом то, что просто увидел впервые.
+//
+// Muted — молчим ли сейчас, и до какого времени.
+func (st *State) Muted(now time.Time) (bool, time.Time) {
+	until, ok := parseTime(st.MutedUntil)
+	return ok && now.Before(until), until
+}
+
+// Mute включает тишину. Возвращает момент, до которого она действует.
+func (st *State) Mute(now time.Time, d time.Duration) time.Time {
+	until := now.Add(d)
+	st.MutedUntil = until.UTC().Format(time.RFC3339)
+	return until
+}
+
+func (st *State) Unmute() { st.MutedUntil = "" }
+
 func (st *State) Apply(s *Summary, now time.Time, remind, stale time.Duration) []Event {
 	var events []Event
 

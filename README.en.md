@@ -22,12 +22,12 @@ is decided explicitly, rather than by whoever gets there first.
 `samoy.love` reads as the owner's surname. Four services live under that
 domain on a single host, and this page watches them:
 
-|                |                                                    |                                                     |
-| -------------- | -------------------------------------------------- | --------------------------------------------------- |
-| **ChillHub**   | [launcher.samoy.love](https://launcher.samoy.love) | game launcher: site, build delivery, client updates |
-| **Snakes**     | [snakes.samoy.love](https://snakes.samoy.love)     | multiplayer territory capture                       |
-| **MetroKit**   | [metro.samoy.love](https://metro.samoy.love)       | offline PWA with the Moscow metro map               |
-| **samoy.love** | [samoy.love](https://samoy.love)                   | personal page and project showcase                  |
+|              |                                                    |                                                 |
+| ------------ | -------------------------------------------------- | ----------------------------------------------- |
+| **Launcher** | [launcher.samoy.love](https://launcher.samoy.love) | ChillHub: site, build delivery, client updates  |
+| **Snakes**   | [snakes.samoy.love](https://snakes.samoy.love)     | multiplayer territory capture                   |
+| **Metro**    | [metro.samoy.love](https://metro.samoy.love)       | offline Moscow metro map, works without network |
+| **Card**     | [samoy.love](https://samoy.love)                   | personal page and project showcase              |
 
 <img src="docs/img/page.svg" alt="Status page" width="100%">
 
@@ -36,7 +36,7 @@ domain on a single host, and this page watches them:
 ```mermaid
 flowchart LR
     subgraph host["single host"]
-        svc["services<br/>ChillHub · Snakes<br/>MetroKit · samoy.love"]
+        svc["services<br/>Launcher · Snakes<br/>Metro · Card"]
         agent["agent<br/>Go, every minute"]
         json[("summary.json")]
         page["page<br/>Astro"]

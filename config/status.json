@@ -5,8 +5,8 @@
   "projects": [
     {
       "id": "launcher",
-      "title": "ChillHub",
-      "subtitle": "Лаунчер игр: сайт, раздача сборок и админка",
+      "title": "Лаунчер",
+      "subtitle": "ChillHub · сайт, раздача сборок, обновление клиента",
       "url": "https://launcher.samoy.love",
       "accent": "oklch(0.75 0.15 55)",
       "checks": [
@@ -46,7 +46,9 @@
               "name": "последняя версия",
               "url": "https://launcher.samoy.love/manifests/launcher/latest.json",
               "expect": 200,
-              "capture": { "version": "version" }
+              "capture": {
+                "version": "version"
+              }
             },
             {
               "name": "манифест сборки",
@@ -69,19 +71,37 @@
         }
       ],
       "units": [
-        { "name": "chillhub-api.service", "title": "Публичный API" },
-        { "name": "chillhub-admin.service", "title": "Админка" }
+        {
+          "name": "chillhub-api.service",
+          "title": "Публичный API"
+        },
+        {
+          "name": "chillhub-admin.service",
+          "title": "Админка"
+        }
       ],
       "builds": [
-        { "title": "Сайт", "type": "url", "path": "https://launcher.samoy.love/version.json" },
-        { "title": "Публичный API", "type": "release", "path": "/opt/chillhub-api/current" },
-        { "title": "Админка", "type": "release", "path": "/opt/chillhub-admin/current" }
+        {
+          "title": "Сайт",
+          "type": "url",
+          "path": "https://launcher.samoy.love/version.json"
+        },
+        {
+          "title": "Публичный API",
+          "type": "release",
+          "path": "/opt/chillhub-api/current"
+        },
+        {
+          "title": "Админка",
+          "type": "release",
+          "path": "/opt/chillhub-admin/current"
+        }
       ]
     },
     {
       "id": "snakes",
-      "title": "Snakes",
-      "subtitle": "Мультиплеерный захват территории",
+      "title": "Змейки",
+      "subtitle": "Snakes · мультиплеерный захват территории",
       "url": "https://snakes.samoy.love",
       "accent": "oklch(0.85 0.2 130)",
       "checks": [
@@ -109,7 +129,12 @@
           "cert": "snakes.samoy.love"
         }
       ],
-      "units": [{ "name": "snakes.service", "title": "Игровой сервер" }],
+      "units": [
+        {
+          "name": "snakes.service",
+          "title": "Игровой сервер"
+        }
+      ],
       "builds": [
         {
           "title": "Сервер и клиент",
@@ -120,8 +145,8 @@
     },
     {
       "id": "metro",
-      "title": "MetroKit",
-      "subtitle": "Офлайн-схема московского метро",
+      "title": "Метро",
+      "subtitle": "Офлайн-схема московского метро, работает без сети",
       "url": "https://metro.samoy.love",
       "accent": "oklch(0.78 0.17 350)",
       "checks": [
@@ -151,13 +176,17 @@
         }
       ],
       "builds": [
-        { "title": "Сайт", "type": "url", "path": "https://metro.samoy.love/version.json" }
+        {
+          "title": "Сайт",
+          "type": "url",
+          "path": "https://metro.samoy.love/version.json"
+        }
       ]
     },
     {
       "id": "samoylove",
-      "title": "samoy.love",
-      "subtitle": "Личная страница и витрина проектов",
+      "title": "Визитка",
+      "subtitle": "samoy.love · личная страница и витрина проектов",
       "url": "https://samoy.love",
       "accent": "oklch(0.78 0.16 195)",
       "checks": [
@@ -174,7 +203,13 @@
           "cert": "samoy.love"
         }
       ],
-      "builds": [{ "title": "Сайт", "type": "url", "path": "https://samoy.love/version.json" }]
+      "builds": [
+        {
+          "title": "Сайт",
+          "type": "url",
+          "path": "https://samoy.love/version.json"
+        }
+      ]
     }
   ]
 }

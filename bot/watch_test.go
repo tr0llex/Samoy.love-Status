@@ -326,3 +326,30 @@ func TestВторостепеннаяПроверкаПомеченаВУвед�
 		t.Errorf("владелец должен видеть, что проверка второстепенная: %q", ev[0].Title)
 	}
 }
+
+func TestТишинаГлушитТолькоНапоминания(t *testing.T) {
+	// «Тихо до утра» просят, когда авария известна и чинится. Это не значит
+	// «не сообщай о новых»: следующее падение должно дойти.
+	st := newState()
+	now := time.Now().UTC()
+
+	until := st.Mute(now, 2*time.Hour)
+	if !until.After(now) {
+		t.Fatal("тишина должна кончаться в будущем")
+	}
+	// Хранится RFC3339 — до секунд, поэтому сравниваем усечённое.
+	muted, gotUntil := st.Muted(now)
+	if !muted || !gotUntil.Equal(until.Truncate(time.Second)) {
+		t.Errorf("ожидали тишину до %s, получили %v/%s", until, muted, gotUntil)
+	}
+
+	// Срок вышел — молчать больше нечего.
+	if muted, _ := st.Muted(now.Add(3 * time.Hour)); muted {
+		t.Error("тишина обязана кончаться сама: иначе бот замолкает навсегда")
+	}
+
+	st.Unmute()
+	if muted, _ := st.Muted(now); muted {
+		t.Error("после снятия тишины бот снова говорит")
+	}
+}

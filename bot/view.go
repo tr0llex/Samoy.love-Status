@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 )
@@ -64,6 +65,11 @@ func handleCallback(ctx context.Context, tg *Telegram, q *CallbackQuery, owner i
 		return
 	}
 
+	// Действия обрабатываются отдельно: они меняют состояние, а не экран.
+	if handled := handleAction(ctx, tg, q, owner); handled {
+		return
+	}
+
 	view := q.Data
 	switch view {
 	case ViewStatus, ViewVersions, ViewIncidents, ViewHelp:
@@ -77,4 +83,44 @@ func handleCallback(ctx context.Context, tg *Telegram, q *CallbackQuery, owner i
 	if err := tg.Edit(ctx, q.Message.Chat.ID, q.Message.MessageID, text, navKeyboard(view)); err != nil {
 		log.Printf("экран %s не перерисован: %v", view, err)
 	}
+}
+
+// handleAction — нажатия, которые что-то делают, а не листают экраны.
+//
+// Ответ приходит новым сообщением, а не правкой уведомления: уведомление о
+// падении должно остаться в переписке как было — по нему потом восстанавливают
+// картину. Затирать его подтверждением тишины значит терять историю.
+func handleAction(ctx context.Context, tg *Telegram, q *CallbackQuery, owner int64) bool {
+	var d time.Duration
+	switch q.Data {
+	case ActMute2h:
+		d = 2 * time.Hour
+	case ActMute8h:
+		d = 8 * time.Hour
+	case ActUnmute:
+	default:
+		return false
+	}
+
+	now := time.Now().UTC()
+	mu.Lock()
+	var text string
+	if q.Data == ActUnmute {
+		botState.Unmute()
+		text = "🔔 Снова сообщаю о падениях"
+	} else {
+		until := botState.Mute(now, d)
+		// Говорим, до какого времени, а не «на 2 часа»: под утро разница
+		// между «через два часа» и «в 07:40» существенная.
+		text = fmt.Sprintf("🔕 Молчу до %s\nПадения всё это время записываются — увижу в /incidents.", fmtTime(until))
+	}
+	if err := saveState(statePath, botState); err != nil {
+		log.Printf("состояние не сохранено: %v", err)
+	}
+	mu.Unlock()
+
+	if err := tg.SendWith(ctx, owner, text, mutedKeyboard()); err != nil {
+		log.Printf("подтверждение тишины не отправлено: %v", err)
+	}
+	return true
 }
