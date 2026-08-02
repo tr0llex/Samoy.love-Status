@@ -15,3 +15,7 @@ agent/agent.exe
 agent/agent
 bot/bot.exe
 bot/bot
+
+# Отчёты сквозных тестов.
+test-results/
+playwright-report/

@@ -31,6 +31,10 @@ import (
 // форматированию ответов; задаётся один раз при старте.
 var staleAfter = 5 * time.Minute
 
+// metrics — счётчики процесса. nil, пока main их не завёл: все методы
+// безопасны на nil-приёмнике, поэтому тесты обработчиков ничего не настраивают.
+var metrics *botMetrics
+
 func envDuration(name string, def time.Duration) time.Duration {
 	v := os.Getenv(name)
 	if v == "" {
@@ -55,7 +59,17 @@ func main() {
 		"с какого возраста данные агента считаются устаревшими")
 	selftest := flag.Bool("selftest", false,
 		"отправить владельцу текущее состояние и выйти — проверка канала после выкатки")
+	metricsPath := flag.String("metrics", defaultBotMetricsPath,
+		"куда класть .prom для textfile-коллектора node_exporter; пусто — не писать")
 	flag.Parse()
+
+	// Счётчики — пакетная переменная, а не параметр каждой функции: наблюдение
+	// не должно просачиваться в подписи обработчиков команд, которые про него
+	// ничего знать не обязаны.
+	metrics = newBotMetrics(*metricsPath, time.Now())
+	if err := metrics.flush(time.Now()); err != nil {
+		log.Printf("метрики не записаны (%s): %v", *metricsPath, err)
+	}
 
 	staleAfter = *stale
 
@@ -122,10 +136,19 @@ func main() {
 
 			for _, e := range events {
 				if err := tg.SendWith(ctx, owner, formatEvent(e), alertKeyboard()); err != nil {
+					metrics.sendFailed()
 					log.Printf("уведомление не отправлено (%s %s): %v", e.Kind, e.Key, err)
 					continue
 				}
+				metrics.notified(string(e.Kind), time.Now().UTC())
 				log.Printf("уведомление: %s %s", e.Kind, e.Key)
+			}
+
+			// Файл переписывается на каждом обходе, а не только при событии:
+			// по отметке heartbeat видно, что бот жив, даже когда всё спокойно
+			// и уведомлять не о чем.
+			if err := metrics.flush(time.Now()); err != nil {
+				log.Printf("метрики не записаны: %v", err)
 			}
 		}
 	}()
@@ -148,6 +171,7 @@ func main() {
 				}
 				// Сеть моргает, Telegram иногда отвечает 502. Пауза нужна,
 				// чтобы при затяжном сбое не молотить запросами впустую.
+				metrics.pollFailed()
 				log.Printf("опрос Telegram не удался: %v", err)
 				select {
 				case <-ctx.Done():
@@ -218,11 +242,13 @@ func handleUpdate(ctx context.Context, tg *Telegram, u Update, owner int64, self
 	// Команды логируются: без этого не понять, дошло ли сообщение до бота,
 	// когда владельцу кажется, что тот молчит. Текст не пишем — в журнале
 	// ему делать нечего.
+	metrics.command(cmd)
 	log.Printf("команда /%s", cmd)
 
 	view := viewOf(cmd)
 	text := renderView(view, summaryPath, time.Now().UTC())
 	if err := tg.SendWith(ctx, owner, text, navKeyboard(view)); err != nil {
+		metrics.sendFailed()
 		log.Printf("ответ на /%s не отправлен: %v", cmd, err)
 	}
 }

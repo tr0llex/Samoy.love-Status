@@ -741,7 +741,11 @@ func uptimeFromRaw(raw []sample, hours int) *float64 {
 func main() {
 	cfgPath := flag.String("config", "/etc/status-agent/status.json", "путь к конфигу")
 	dataDir := flag.String("data", "/var/www/status/data", "куда складывать данные")
+	metricsPath := flag.String("metrics", defaultMetricsPath,
+		"куда класть .prom для textfile-коллектора node_exporter; пусто — не писать")
 	flag.Parse()
+
+	runStart := time.Now()
 
 	var cfg Config
 	if !readJSON(*cfgPath, &cfg) {
@@ -968,6 +972,12 @@ func main() {
 		"проверок: %d, критичных недоступно: %d, медленных: %d, второстепенных недоступно: %d, состояние: %s",
 		len(jobs), down, slow, aux, out.Overall,
 	)
+
+	// Метрики пишутся последними и не могут сорвать запуск: данные страницы
+	// уже на диске, и падать из-за наблюдения за собой было бы обидно.
+	if err := writeMetrics(*metricsPath, buildMetrics(out, incidents, time.Since(runStart), now)); err != nil {
+		log.Printf("метрики не записаны (%s): %v", *metricsPath, err)
+	}
 }
 
 // projectStatus — вердикт по критичным проверкам.

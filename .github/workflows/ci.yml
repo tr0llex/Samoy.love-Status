@@ -93,3 +93,52 @@ jobs:
       # в нём ломает обоих разом.
       - name: Проверить конфиг проверок
         run: node -e "const c=require('./config/status.json'); if(!c.projects?.length) throw new Error('в конфиге нет проектов'); for(const p of c.projects){ if(!p.checks?.length) throw new Error('у проекта '+p.id+' нет проверок'); }"
+
+  e2e:
+    name: Сквозные тесты
+    runs-on: ubuntu-latest
+
+    # Проверка после выкатки смотрит на код ответа. Статус-страница отдаёт 200
+    # даже когда данных нет, скрипт упал на неожиданном поле и на экране пусто.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # Кэшируем ровно ту версию браузера, что просит установленный Playwright:
+      # иначе после обновления пакета в кэше останется несовместимый бинарник.
+      - name: Версия Playwright
+        id: pw
+        run: echo "v=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        id: pw-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ steps.pw.outputs.v }}
+
+      # Ставим только Chromium — прогон идёт в нём одном, остальные браузеры
+      # это лишние сотни мегабайт на каждый PR.
+      - name: Поставить Chromium
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Системные библиотеки для Chromium
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      # Конфиг сам собирает страницу и поднимает preview. Данные проверок
+      # подменяются наборами из e2e/fixtures — живой summary.json тут не нужен.
+      - run: npm run e2e
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
