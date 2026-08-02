@@ -53,16 +53,17 @@ func TestFormatStatus(t *testing.T) {
 		Updated: now.Add(-time.Minute).Format(time.RFC3339),
 		Overall: "degraded",
 		Projects: []Project{{
-			Title: "Snakes", Status: "degraded", Up: 1, Total: 2,
+			Title: "Змейки", Status: "degraded", Up: 1, Total: 2,
 			Checks: []Check{
 				{
-					Name: "Клиент", Status: "up", Ms: 120,
+					Name: "Клиент", Status: "up", Critical: true, Ms: 120,
 					Since:  now.Add(-2 * time.Hour).Format(time.RFC3339),
 					Uptime: map[string]*float64{"d1": &uptime},
 				},
 				{
-					Name: "Игровой сервер", Status: "down", Error: "HTTP 502",
-					Since: now.Add(-10 * time.Minute).Format(time.RFC3339),
+					Name: "Игровой сервер", Status: "down", Critical: true, Error: "HTTP 502",
+					Impact: "Матчи не идут",
+					Since:  now.Add(-10 * time.Minute).Format(time.RFC3339),
 				},
 			},
 			Units: []Unit{{
@@ -72,14 +73,25 @@ func TestFormatStatus(t *testing.T) {
 	}
 
 	got := formatStatus(s, now)
+
+	// Сломанное разворачивается целиком: что это, для кого плохо, почему и
+	// сколько уже длится.
 	for _, want := range []string{
-		"Частичный сбой", "Snakes", "1/2",
-		"Клиент", "120 мс", "99.98%", "2 ч",
-		"HTTP 502", "10 мин", "failed",
-		"Данные агента",
+		"Частичный сбой", "1/2",
+		"Игровой сервер", "Матчи не идут", "HTTP 502", "10 мин",
+		"failed", "Данные агента",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("в ответе нет %q:\n%s", want, got)
+		}
+	}
+
+	// А исправное — сворачивается. Раньше бот печатал время ответа и проценты
+	// у каждой зелёной проверки, и ответ на /status превращался в простыню,
+	// в которой единственную красную строку приходилось искать глазами.
+	for _, unwanted := range []string{"120 мс", "99.98%"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("подробности исправной проверки не нужны, но %q есть:\n%s", unwanted, got)
 		}
 	}
 }

@@ -210,6 +210,66 @@
           "path": "https://samoy.love/version.json"
         }
       ]
+    },
+    {
+      "id": "status",
+      "title": "Статус",
+      "subtitle": "Эта страница, агент проверок и бот",
+      "url": "https://status.samoy.love",
+      "accent": "oklch(0.72 0.12 265)",
+      "//": "Страница следит и за собой: иначе о её собственной выкатке и о версии бота не знает никто, а замерший агент виден только по возрасту данных.",
+      "checks": [
+        {
+          "id": "status-page",
+          "name": "Страница",
+          "impact": "Не видно состояния остальных сервисов",
+          "url": "https://status.samoy.love/",
+          "expect": 200,
+          "critical": true,
+          "slowMs": 3000,
+          "expectType": "text/html",
+          "bodyIncludes": "</html>",
+          "cert": "status.samoy.love"
+        },
+        {
+          "id": "status-miniapp",
+          "name": "Мини-приложение",
+          "note": "Открывается кнопкой из бота",
+          "impact": "Кнопка «Открыть» в боте ведёт в никуда",
+          "url": "https://status.samoy.love/tg/",
+          "expect": 200,
+          "critical": false,
+          "slowMs": 3000,
+          "expectType": "text/html"
+        }
+      ],
+      "units": [
+        {
+          "name": "status-agent.timer",
+          "title": "Таймер проверок"
+        },
+        {
+          "name": "samoylove-bot.service",
+          "title": "Телеграм-бот"
+        }
+      ],
+      "builds": [
+        {
+          "title": "Страница",
+          "type": "url",
+          "path": "https://status.samoy.love/version.json"
+        },
+        {
+          "title": "Агент",
+          "type": "release",
+          "path": "/opt/status-agent/current"
+        },
+        {
+          "title": "Бот",
+          "type": "release",
+          "path": "/opt/samoylove-bot/current"
+        }
+      ]
     }
   ]
 }

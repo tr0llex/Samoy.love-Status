@@ -159,21 +159,21 @@ func projectStrip(p Project) string {
 func formatStatus(s *Summary, now time.Time) string {
 	var b strings.Builder
 
-	// Заголовок — одно утверждение крупно, как на странице: с него читают.
+	// Тот же принцип, что на странице: здоровое сворачивается, сломанное
+	// поднимается наверх. Раньше бот печатал все проекты со всеми проверками,
+	// службами и полосками — два десятка зелёных строк, среди которых
+	// единственную красную приходилось искать глазами.
 	switch s.Overall {
 	case "operational":
 		b.WriteString(up + " <b>Всё работает</b>")
 	case "down":
 		b.WriteString(down + " <b>Всё лежит</b>")
 	case "major":
-		// Ступень между частичным и массовым: больше половины ключевых
-		// проверок лежит. Раньше это описывалось словом «частичный».
 		b.WriteString(down + " <b>Крупный сбой</b>")
 	default:
 		b.WriteString(degraded + " <b>Частичный сбой</b>")
 	}
 
-	// Сводка одной строкой под заголовком.
 	var okCrit, totalCrit, auxBad int
 	for _, p := range s.Projects {
 		okCrit += p.Up
@@ -186,89 +186,57 @@ func formatStatus(s *Summary, now time.Time) string {
 	}
 	b.WriteString("\n")
 
-	// Сломанное — отдельным блоком наверху, ровно как на странице: искать
-	// красную строку среди зелёных владелец не должен.
-	var broken []string
+	// Сломанное — единственное, что раскрывается подробно.
 	for _, p := range s.Projects {
 		for _, c := range p.Checks {
-			if c.Status != "down" {
+			if c.Status == "up" {
 				continue
 			}
-			icon := statusIcon(c.Status)
-			tail := ""
+			icon, tail := statusIcon(c.Status), ""
 			if !c.Critical {
 				icon, tail = degraded, " <i>(второстеп.)</i>"
 			}
-			line := fmt.Sprintf("%s <b>%s · %s</b>%s",
-				icon, link(p.Title, p.URL), link(c.Name, c.URL), tail)
-			if c.Impact != "" {
-				line += "\n   " + esc(c.Impact)
+			fmt.Fprintf(&b, "\n%s <b>%s · %s</b>%s", icon, link(p.Title, p.URL), link(c.Name, c.URL), tail)
+			if c.Impact != "" && c.Status == "down" {
+				b.WriteString("\n   " + esc(c.Impact))
 			}
 			if c.Error != "" {
-				line += "\n   <code>" + esc(c.Error) + "</code>"
+				b.WriteString("\n   <code>" + esc(c.Error) + "</code>")
 			}
 			if t, ok := parseTime(c.Since); ok {
-				line += "\n   недоступен " + humanDur(now.Sub(t))
+				fmt.Fprintf(&b, "\n   %s", humanDur(now.Sub(t)))
 			}
-			broken = append(broken, line)
+			b.WriteString("\n")
 		}
 	}
-	if len(broken) > 0 {
-		b.WriteString("\n" + strings.Join(broken, "\n") + "\n")
-	}
 
+	// Остальные проекты — по строке. Полоска за две недели говорит о них
+	// больше, чем перечисление процентов у каждой проверки.
+	b.WriteString("\n")
 	for _, p := range s.Projects {
 		aux := ""
 		if n := p.AuxDown + p.AuxSlow; n > 0 {
-			aux = fmt.Sprintf(" <i>+%d второстеп.</i>", n)
+			aux = fmt.Sprintf(" <i>+%d</i>", n)
 		}
-		fmt.Fprintf(&b, "\n%s <b>%s</b> <code>%d/%d</code>%s\n",
-			statusIcon(p.Status), link(p.Title, p.URL), p.Up, p.Total, aux)
-
-		if strip := projectStrip(p); strings.Contains(strip, "🟩") ||
-			strings.Contains(strip, "🟨") || strings.Contains(strip, "🟧") ||
-			strings.Contains(strip, "🟥") {
-			b.WriteString(strip + " <i>14 дн.</i>\n")
+		fmt.Fprintf(&b, "%s %s <code>%d/%d</code>%s", statusIcon(p.Status), link(p.Title, p.URL), p.Up, p.Total, aux)
+		if strip := projectStrip(p); strings.ContainsAny(strip, "🟩🟨🟧🟥") {
+			b.WriteString("\n" + strip)
 		}
+		b.WriteString("\n")
+	}
 
-		for _, c := range p.Checks {
-			mark := " "
-			if !c.Critical {
-				mark = "·"
-			}
-			fmt.Fprintf(&b, "%s%s %s", mark, statusIcon(c.Status), link(c.Name, c.URL))
-			switch c.Status {
-			case "up":
-				fmt.Fprintf(&b, " <code>%d мс</code>", c.Ms)
-			case "slow":
-				fmt.Fprintf(&b, " <code>%d мс</code> — медленно", c.Ms)
-			default:
-				// Причину не повторяем: она уже развёрнута в блоке сбоев
-				// наверху, а здесь строка должна остаться в одну.
-				b.WriteString(" — недоступен")
-			}
-			if v := c.Uptime["d1"]; v != nil {
-				fmt.Fprintf(&b, " · сутки <code>%.2f%%</code>", *v)
-			}
-			// Сколько держится текущее состояние. У упавших это уже сказано
-			// в блоке сбоев выше, здесь — про то, как давно всё хорошо.
-			if t, ok := parseTime(c.Since); ok && c.Status != "down" {
-				fmt.Fprintf(&b, " · %s", humanDur(now.Sub(t)))
-			}
-			b.WriteString("\n")
-		}
-
+	// Службы показываем только когда с ними что-то не так: перечислять
+	// работающие значит утопить в них неработающую.
+	var dead []string
+	for _, p := range s.Projects {
 		for _, u := range p.Units {
-			icon := down
-			if u.Active {
-				icon = up
+			if !u.Active {
+				dead = append(dead, fmt.Sprintf("%s %s · %s — %s", down, esc(p.Title), esc(u.Title), esc(u.State)))
 			}
-			fmt.Fprintf(&b, " %s %s — %s", icon, esc(u.Title), esc(u.State))
-			if t, ok := parseTime(u.Since); ok && u.Active {
-				fmt.Fprintf(&b, ", аптайм %s", humanDur(now.Sub(t)))
-			}
-			b.WriteString("\n")
 		}
+	}
+	if len(dead) > 0 {
+		b.WriteString("\n" + strings.Join(dead, "\n") + "\n")
 	}
 
 	b.WriteString("\n" + freshness(s, now))
