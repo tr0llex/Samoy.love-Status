@@ -26,6 +26,9 @@ concurrency:
   group: probe
   cancel-in-progress: false
 
+# Самый широкий токен в проекте: запись нужна по делу — обход сохраняет
+# результат коммитом в ветку status-data. Сузить право нельзя, поэтому сужено
+# ВРЕМЯ его доступности: см. persist-credentials ниже.
 permissions:
   contents: write
 
@@ -34,7 +37,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # persist-credentials: false — токен НЕ остаётся в .git/config на весь
+      # job. Между checkout и push здесь выполняется scripts/probe.mjs, который
+      # ходит по внешним адресам из config/status.json; всё это время
+      # write-токен лежал в рабочем каталоге и доставался любому коду, который
+      # там запускается. Теперь он появляется только в шаге push, явной строкой.
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v7
         with:
@@ -74,6 +84,10 @@ jobs:
           done
 
       - name: Сохранить результат
+        env:
+          # Токен доступен ровно этому шагу и ровно на время push'а —
+          # см. persist-credentials в шаге checkout.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name  'status-probe'
           git config user.email 'status-probe@users.noreply.github.com'
@@ -89,4 +103,4 @@ jobs:
           git commit -m "probe: $(date -u '+%Y-%m-%d %H:%M UTC')"
           # Ветка — приватная память пробера, история в ней не нужна:
           # force-push избавляет от гонок между запусками и от rebase-плясок.
-          git push -f origin status-data
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" status-data

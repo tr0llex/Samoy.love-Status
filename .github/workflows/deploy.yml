@@ -83,7 +83,9 @@ jobs:
       # nginx-conf не передаём: с «Чистки» (5908166) конфиг живёт в самом
       # deploy-kit, а не в этом репозитории. Ссылка на удалённый файл роняла
       # выкатку страницы на шаге проверки конфига.
-      gates: npm ci && npm run build
+      # check:no-inline-scripts — часть гейта, а не украшение: CSP на проде
+      # отдаёт script-src 'self', и вернувшийся инлайн-скрипт не выполнится.
+      gates: npm ci && npm run build && npm run check:no-inline-scripts
       dry-run: ${{ inputs.dry-run == true }}
     secrets: inherit
 
