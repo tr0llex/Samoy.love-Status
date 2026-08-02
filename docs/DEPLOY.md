@@ -50,6 +50,40 @@ sudo install -m 0644 deploy/systemd/samoylove-bot.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now samoylove-bot.service
 ```
 
+## Переезд бота на новое имя (один раз)
+
+Бот переименован из `samoy-bot` в `samoylove-bot`. Пути, юнит, пользователь и
+каталог секретов сменились вместе с ним, а на хосте остались старые — выкатка
+падает на `chown: invalid group`. Один раз нужно сделать это руками:
+
+```bash
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin samoylove-bot
+sudo install -d -m 0755 -o samoylove-bot -g samoylove-bot /var/lib/samoylove-bot
+sudo install -d -m 0755 /etc/samoylove-bot
+
+# Секреты переносим, а не заводим заново: chat id и токен те же.
+sudo mv /etc/samoy-bot/env /etc/samoylove-bot/env
+sudo chmod 0600 /etc/samoylove-bot/env
+
+# Историю уведомлений тоже: без неё бот при старте объявит заново всё,
+# что сейчас лежит, и повторит все известные ему версии.
+sudo mv /var/lib/samoy-bot/state.json /var/lib/samoylove-bot/state.json
+sudo chown samoylove-bot:samoylove-bot /var/lib/samoylove-bot/state.json
+
+sudo install -m 0644 deploy/systemd/samoylove-bot.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl disable --now samoy-bot.service
+sudo systemctl enable --now samoylove-bot.service
+```
+
+После этого выкатка бота проходит обычным порядком. Старое можно убрать:
+
+```bash
+sudo rm -rf /opt/samoy-bot /var/lib/samoy-bot /etc/samoy-bot
+sudo rm -f /etc/systemd/system/samoy-bot.service
+sudo userdel samoy-bot
+```
+
 ## Бот: секреты и проверка канала
 
 Токен и chat id — в `/etc/samoylove-bot/env` (0600, root), образец:
