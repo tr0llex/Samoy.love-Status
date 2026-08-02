@@ -212,7 +212,7 @@ jobs:
       # подменяются наборами из e2e/fixtures — живой summary.json тут не нужен.
       - run: npm run e2e
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-report
