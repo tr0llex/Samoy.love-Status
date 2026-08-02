@@ -88,15 +88,12 @@ async function checkHttp(service) {
  */
 function checkCert(host) {
   return new Promise((resolve) => {
-    const socket = connect(
-      { host, port: 443, servername: host, timeout: TIMEOUT_MS },
-      () => {
-        const cert = socket.getPeerCertificate();
-        socket.end();
-        if (!cert?.valid_to) return resolve(null);
-        resolve(Math.floor((Date.parse(cert.valid_to) - now) / 86_400_000));
-      },
-    );
+    const socket = connect({ host, port: 443, servername: host, timeout: TIMEOUT_MS }, () => {
+      const cert = socket.getPeerCertificate();
+      socket.end();
+      if (!cert?.valid_to) return resolve(null);
+      resolve(Math.floor((Date.parse(cert.valid_to) - now) / 86_400_000));
+    });
     socket.on('error', () => resolve(null));
     socket.on('timeout', () => {
       socket.destroy();
@@ -126,7 +123,8 @@ const pct = (up, total) => (total ? Math.round((up / total) * 10000) / 100 : nul
 /** Аптайм по сырым замерам за последние N часов. */
 function uptimeRaw(raw, hours) {
   const from = now - hours * 3600_000;
-  let up = 0, total = 0;
+  let up = 0,
+    total = 0;
   for (const [ts, ok] of raw) {
     if (ts >= from) {
       total += 1;
@@ -138,7 +136,8 @@ function uptimeRaw(raw, hours) {
 
 /** Аптайм по агрегатам за последние N корзин. */
 function uptimeBuckets(buckets, count) {
-  let up = 0, total = 0;
+  let up = 0,
+    total = 0;
   for (const [, u, t] of buckets.slice(-count)) {
     up += u;
     total += t;
@@ -224,7 +223,20 @@ for (const r of results) {
   await writeJson(dailyFile, daily);
 
   // --- смена состояния → инцидент + уведомление
+  //
+  // Пока сервис лежит, сообщение уходит на КАЖДОМ обходе, а не один раз при
+  // падении: молчание после первого сообщения читается как «уже починилось».
+  // Продолжение пишется короче первого и несёт длительность простоя.
   let since = prev?.since ?? new Date(now).toISOString();
+  if (prev && prev.status === 'down' && status === 'down') {
+    const open = incidents.find((i) => i.service === s.id && !i.end);
+    const downFor = open ? Date.parse(new Date(now).toISOString()) - Date.parse(open.start) : null;
+    messages.push(
+      `🔴 <b>${s.fullName}</b> всё ещё недоступен` +
+        (downFor !== null ? ` — ${humanDuration(downFor)}` : '') +
+        (r.error ? `\n${r.error}` : ''),
+    );
+  }
   if (prev && prev.status !== status) {
     since = new Date(now).toISOString();
     if (status === 'down') {
