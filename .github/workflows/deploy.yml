@@ -30,7 +30,9 @@ jobs:
     uses: tr0llex/deploy-kit/.github/workflows/static-site.yml@main
     with:
       config: .deploy-kit/site.env
-      nginx-conf: deploy/nginx/status.samoy.love.conf
+      # nginx-conf не передаём: с «Чистки» (5908166) конфиг живёт в самом
+      # deploy-kit, а не в этом репозитории. Ссылка на удалённый файл роняла
+      # выкатку страницы на шаге проверки конфига.
       gates: npm ci && npm run build
       dry-run: ${{ inputs.dry-run == true }}
     secrets: inherit
@@ -46,7 +48,15 @@ jobs:
     secrets: inherit
 
   bot:
-    if: inputs.target == '' || inputs.target == 'all' || inputs.target == 'bot'
+    # Агент и бот едут одним и тем же go-service.yml, а у него группа
+    # concurrency общая на репозиторий. Запущенные одновременно, они попадают
+    # в одну очередь, и ожидающий отменяется — бот стабильно падал за 0 секунд,
+    # ничего не выкатив. Поэтому он ждёт агента, а не стартует параллельно.
+    needs: agent
+    if: >-
+      !cancelled()
+      && (needs.agent.result == 'success' || needs.agent.result == 'skipped')
+      && (inputs.target == '' || inputs.target == 'all' || inputs.target == 'bot')
     uses: tr0llex/deploy-kit/.github/workflows/go-service.yml@main
     with:
       config: .deploy-kit/bot.env

@@ -20,6 +20,14 @@ linters:
       # Запись истории — best-effort: упавший файл агрегата не должен ронять
       # обход, поэтому ошибки writeJSON гасятся явным `_ =`.
       check-blank: false
+      # `defer resp.Body.Close()` — идиома, и оборачивать её в замыкание ради
+      # ошибки, с которой всё равно нечего делать, значит ухудшить читаемость
+      # ради формальности.
+      exclude-functions:
+        - (io.Closer).Close
+        - (io.ReadCloser).Close
+        - (net.Conn).Close
+        - (*crypto/tls.Conn).Close
     misspell:
       locale: US
 

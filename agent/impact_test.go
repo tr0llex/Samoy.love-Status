@@ -17,7 +17,7 @@ import (
 func TestКод200СНеправильнымТеломЭтоСбой(t *testing.T) {
 	// Сервис отвечает 200 и страницей об ошибке. По одному коду он здоров, для
 	// пользователя — нет.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`<h1>503 Service Unavailable</h1>`))
 	}))
@@ -35,7 +35,7 @@ func TestКод200СНеправильнымТеломЭтоСбой(t *testing.
 func TestНеправильныйContentTypeЭтоСбой(t *testing.T) {
 	// Главный тихий сбой service worker'а: SPA-фолбэк отдаёт HTML вместо
 	// скрипта, код при этом 200, а офлайн-режим у пользователей сломан.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = w.Write([]byte("<!doctype html><html></html>"))
 	}))
@@ -48,7 +48,7 @@ func TestНеправильныйContentTypeЭтоСбой(t *testing.T) {
 }
 
 func TestМедленныйОтветЭтоОтдельноеСостояние(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		time.Sleep(150 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -72,7 +72,7 @@ func TestМедленныйОтветЭтоОтдельноеСостояние(
 }
 
 func TestУпавшаяПроверкаНеПометитсяМедленной(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		time.Sleep(120 * time.Millisecond)
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -87,7 +87,7 @@ func TestУпавшаяПроверкаНеПометитсяМедленной(
 func TestРедиректНаЧужойХостЭтоСбой(t *testing.T) {
 	// Угнанный домен или кривой конфиг nginx иначе выглядят здоровьем:
 	// посторонний сервер ответил 200, и проверка довольна.
-	final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer final.Close()
@@ -139,7 +139,7 @@ func TestСписокРазрешённыхХостов(t *testing.T) {
 func TestСбойПодтверждаетсяВторымЗапросом(t *testing.T) {
 	// Первый запрос падает, второй проходит: моргнула сеть, а не сервис.
 	var n int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		n++
 		if n == 1 {
 			w.WriteHeader(http.StatusBadGateway)
@@ -159,7 +159,7 @@ func TestСбойПодтверждаетсяВторымЗапросом(t *tes
 }
 
 func TestНастоящийСбойПереживаетПодтверждение(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 	}))
 	defer srv.Close()
@@ -172,7 +172,7 @@ func TestНастоящийСбойПереживаетПодтверждени�
 
 func TestУспехНеТребуетВторогоЗапроса(t *testing.T) {
 	var n int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		n++
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -190,11 +190,11 @@ func TestСценарийПроходитПутьПользователя(t *tes
 	// Манифест объявляет версию, вторым шагом забираем манифест этой версии.
 	// Одиночный GET по latest.json такую поломку не увидит.
 	mux := http.NewServeMux()
-	mux.HandleFunc("/latest.json", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/latest.json", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"version":"1.2.2"}`))
 	})
-	mux.HandleFunc("/1.2.2.json", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/1.2.2.json", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"version":"1.2.2","files":[{"path":"a.dll"}]}`))
 	})
 	srv := httptest.NewServer(mux)
@@ -213,7 +213,7 @@ func TestСценарийЛовитОборваннуюЦепочку(t *testing
 	// Версия объявлена, а манифеста для неё нет: публикация доехала наполовину.
 	// Это ровно тот случай, когда latest.json отвечает 200 и всё «хорошо».
 	mux := http.NewServeMux()
-	mux.HandleFunc("/latest.json", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/latest.json", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"version":"9.9.9"}`))
 	})
 	srv := httptest.NewServer(mux)
@@ -233,7 +233,7 @@ func TestСценарийЛовитОборваннуюЦепочку(t *testing
 }
 
 func TestСценарийСообщаетОПропавшемПолеЗахвата(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"нетверсии":true}`))
 	}))
 	defer srv.Close()

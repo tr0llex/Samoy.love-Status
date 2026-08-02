@@ -189,8 +189,8 @@ func TestBuildInfoRelease(t *testing.T) {
 }
 
 func TestBuildInfoFromVersionURL(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"version":"20260802-010203-abc1234","commit":"abc1234","builtAt":"2026-08-02T01:02:03Z"}`))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"version":"20260802-010203-abc1234","commit":"abc1234","builtAt":"2026-08-02T01:02:03Z"}`))
 	}))
 	defer srv.Close()
 
@@ -206,7 +206,7 @@ func TestBuildInfoFromVersionURL(t *testing.T) {
 func TestBuildInfoVersionURLUnavailable(t *testing.T) {
 	// Сервис лежит или ещё не отдаёт version.json — агент обязан пережить
 	// это молча и показать остальные проекты, а не свалиться целиком.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 	}))
 	defer srv.Close()
