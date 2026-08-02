@@ -212,6 +212,30 @@ export function uptimeOf(checks: Check[]) {
   return total ? (up / total) * 100 : null;
 }
 
+/**
+ * История проекта по суткам — по ХУДШЕЙ из критичных проверок за день.
+ *
+ * Брать первую попавшуюся проверку нельзя: если в этот день лежал игровой
+ * сервер, день плохой, даже когда сайт открывался. То же правило реализовано
+ * в боте (bot/format.go, projectStrip) — полоска в Telegram и в мини-
+ * приложении должна означать одно и то же.
+ */
+export function worstDays(p: Project, count: number): (Day | null)[] {
+  const out: (Day | null)[] = Array.from({ length: count }, () => null);
+  for (const c of p.checks) {
+    if (!c.critical || !c.days?.length) continue;
+    const days = c.days.slice(-count);
+    const offset = count - days.length;
+    days.forEach((d, i) => {
+      if (!d || !d.total) return;
+      const slot = offset + i;
+      const cur = out[slot];
+      if (!cur || d.up / d.total < cur.up / cur.total) out[slot] = d;
+    });
+  }
+  return out;
+}
+
 export type Overall = 'up' | 'aux' | 'partial' | 'major' | 'down' | 'stale';
 
 export const HERO_TEXT: Record<Overall, string> = {

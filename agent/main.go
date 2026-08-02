@@ -356,9 +356,11 @@ func checkHTTP(c Check, client *http.Client) result {
 	second := checkOnce(c, client)
 	second.attempts = 2
 	if second.status != statusDown {
-		// Первый заход соврал: засчитываем повтор, но помечаем неустойчивость.
-		second.errText = firstNonEmpty(second.errText, "")
-		return second
+		// Первый заход соврал. В выдачу это не идёт — для страницы проверка
+		// просто работает, — но в журнал попадает: если строка появляется
+		// часто, моргает либо сервис, либо дорога до него, и это повод
+		// разбираться, а не молча гасить повтором.
+		log.Printf("проверка %s: первый заход дал %q, повтор прошёл", c.ID, r.errText)
 	}
 	return second
 }

@@ -48,7 +48,6 @@ const DATA_URL = import.meta.env.PUBLIC_DATA_URL ?? '/data/summary.json';
     <script>
       import {
         type Check,
-        type Day,
         type Project,
         type Summary,
         dayClass,
@@ -64,6 +63,7 @@ const DATA_URL = import.meta.env.PUBLIC_DATA_URL ?? '/data/summary.json';
         safeColor,
         troubles,
         uptimeOf,
+        worstDays,
       } from '../lib/status';
 
       const DATA_URL = document.body.dataset.src ?? '/data/summary.json';
@@ -85,10 +85,12 @@ const DATA_URL = import.meta.env.PUBLIC_DATA_URL ?? '/data/summary.json';
       }
 
       // Полоска за 30 дней: на экране телефона девяносто ячеек по 2px
-      // сливаются в кашу, а месяц читается.
-      function strip(days: (Day | null)[] | null | undefined) {
-        const cells = (days ?? []).slice(-30);
-        if (!cells.length) return '';
+      // сливаются в кашу, а месяц читается. Считается по худшей из критичных
+      // проверок за сутки — тем же правилом, что и в боте.
+      const STRIP_DAYS = 30;
+      function strip(p: Project) {
+        const cells = worstDays(p, STRIP_DAYS);
+        if (!cells.some(Boolean)) return '';
         return `<div class="strip">${cells
           .map((d) => `<i class="c ${dayClass(d)}"></i>`)
           .join('')}</div>`;
@@ -111,7 +113,7 @@ const DATA_URL = import.meta.env.PUBLIC_DATA_URL ?? '/data/summary.json';
             <b>${esc(p.title)}</b>
             <span class="cnt">${p.up}/${p.total}${aux ? ` +${aux}` : ''}</span>
           </header>
-          ${strip(p.checks.find((c) => c.critical)?.days)}
+          ${strip(p)}
           <ul class="checks">${p.checks.map(checkLine).join('')}</ul>
         </section>`;
       }

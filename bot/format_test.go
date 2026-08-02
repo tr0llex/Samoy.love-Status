@@ -209,3 +209,31 @@ func TestFormatEvent(t *testing.T) {
 		})
 	}
 }
+
+func TestПолоскаБерётХудшуюИзКритичныхПроверок(t *testing.T) {
+	// Сайт открывался весь день, игровой сервер лежал. День плохой: брать
+	// первую попавшуюся проверку значит показать благополучие, которого не было.
+	full := func(up, total int64) []*Day {
+		d := make([]*Day, stripDays)
+		for i := range d {
+			d[i] = &Day{D: "x", Up: up, Total: total}
+		}
+		return d
+	}
+	p := Project{Checks: []Check{
+		{Name: "Клиент", Critical: true, Days: full(1440, 1440)},
+		{Name: "Игровой сервер", Critical: true, Days: full(0, 1440)},
+	}}
+	if got := projectStrip(p); strings.Contains(got, "🟩") {
+		t.Errorf("день с лежащим сервером не может быть зелёным: %s", got)
+	}
+
+	// Второстепенная проверка полоску портить не должна: вердикт она не роняет.
+	p2 := Project{Checks: []Check{
+		{Name: "Сайт", Critical: true, Days: full(1440, 1440)},
+		{Name: "Админка", Critical: false, Days: full(0, 1440)},
+	}}
+	if got := projectStrip(p2); strings.Contains(got, "🟥") {
+		t.Errorf("второстепенная проверка не должна красить полоску: %s", got)
+	}
+}

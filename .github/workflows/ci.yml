@@ -51,6 +51,11 @@ jobs:
         working-directory: bot
         run: go vet ./...
 
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          working-directory: bot
+
       - name: Тесты
         working-directory: bot
         run: go test ./... -race -coverprofile=coverage.out -covermode=atomic
