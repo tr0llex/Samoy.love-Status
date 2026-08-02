@@ -32,6 +32,32 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
 
+  bot:
+    name: Бот (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: bot/go.mod
+          cache-dependency-path: bot/go.sum
+
+      - name: go vet
+        working-directory: bot
+        run: go vet ./...
+
+      - name: Тесты
+        working-directory: bot
+        run: go test ./... -race -coverprofile=coverage.out -covermode=atomic
+
+      - name: Отправить покрытие в Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          files: bot/coverage.out
+          flags: bot
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
   page:
     name: Страница
     runs-on: ubuntu-latest
