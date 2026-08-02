@@ -1,0 +1,43 @@
+name: Deploy
+
+# Две независимые цели: страница и агент, который собирает для неё данные.
+# Разделены сознательно — правка страницы не должна перезапускать сбор
+# метрик, а обновление агента не должно ждать пересборки статики.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'data/**'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Что катим'
+        type: choice
+        options: [both, site, agent]
+        default: both
+      dry-run:
+        type: boolean
+        default: false
+
+jobs:
+  site:
+    if: inputs.target != 'agent'
+    uses: tr0llex/deploy-kit/.github/workflows/static-site.yml@main
+    with:
+      config: .deploy-kit/site.env
+      nginx-conf: deploy/nginx/status.samoy.love.conf
+      gates: npm ci && npm run build
+      dry-run: ${{ inputs.dry-run == true }}
+    secrets: inherit
+
+  agent:
+    if: inputs.target != 'site'
+    uses: tr0llex/deploy-kit/.github/workflows/go-service.yml@main
+    with:
+      config: .deploy-kit/agent.env
+      workdir: agent
+      gates: go vet ./... && go test ./... -race -coverprofile=coverage.out -covermode=atomic
+      dry-run: ${{ inputs.dry-run == true }}
+    secrets: inherit
