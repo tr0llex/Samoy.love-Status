@@ -69,7 +69,9 @@ same endpoints from outside. It is the only part that survives the server
 going down.
 
 The check history is readable without visiting the site: the watchdog commits
-it straight into the repository, under `data/`.
+it to the [`status-data`](https://github.com/tr0llex/status.samoy.love/tree/status-data)
+branch. It never lands in `main` — five commits an hour would bury the actual
+code changes.
 
 ## Who speaks in Telegram
 

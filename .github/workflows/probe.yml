@@ -40,6 +40,17 @@ jobs:
         with:
           node-version: 24
 
+      # Прошлое состояние лежит на отдельной ветке: main защищён, и пробер
+      # не должен писать в него каждые пять минут. Без этого шага каждый
+      # запуск начинал бы историю заново и считал любой сбой первым.
+      - name: Забрать прошлое состояние
+        run: |
+          if git fetch origin status-data --depth=1 2>/dev/null; then
+            git checkout origin/status-data -- data
+          else
+            echo 'ветки данных ещё нет — первый запуск'
+          fi
+
       # Пять обходов с минутным шагом вместо одного. Cron у GitHub мельче пяти
       # минут не умеет, поэтому окно между запусками закрывается изнутри job'а:
       # падение замечается в среднем за полминуты, а не за две с половиной.
@@ -66,7 +77,9 @@ jobs:
         run: |
           git config user.name  'status-probe'
           git config user.email 'status-probe@users.noreply.github.com'
-          git add data
+          git checkout -B status-data
+          # -f: в main каталог данных под .gitignore, а здесь он и есть смысл ветки.
+          git add -f data
           # Данные не изменились — коммитить нечего (бывает при полном совпадении
           # агрегатов), это нормальный исход, а не ошибка.
           if git diff --cached --quiet; then
@@ -74,13 +87,6 @@ jobs:
             exit 0
           fi
           git commit -m "probe: $(date -u '+%Y-%m-%d %H:%M UTC')"
-          # Между проверкой и push могли лечь чужие коммиты (например, правка
-          # кода). Три попытки с rebase вместо падения всего запуска.
-          for i in 1 2 3; do
-            if git pull --rebase --autostash origin main && git push; then
-              exit 0
-            fi
-            sleep 5
-          done
-          echo '::error::не удалось запушить данные проверок'
-          exit 1
+          # Ветка — приватная память пробера, история в ней не нужна:
+          # force-push избавляет от гонок между запусками и от rebase-плясок.
+          git push -f origin status-data
