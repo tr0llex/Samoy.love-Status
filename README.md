@@ -1,7 +1,8 @@
 # samoy-status
 
-[![CI](https://github.com/tr0llex/Samoy.love-Status/actions/workflows/ci.yml/badge.svg)](https://github.com/tr0llex/Samoy.love-Status/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/tr0llex/Samoy.love-Status/branch/main/graph/badge.svg)](https://codecov.io/gh/tr0llex/Samoy.love-Status)
+[![CI](https://github.com/tr0llex/status.samoy.love/actions/workflows/ci.yml/badge.svg)](https://github.com/tr0llex/status.samoy.love/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/tr0llex/status.samoy.love/branch/main/graph/badge.svg)](https://codecov.io/gh/tr0llex/status.samoy.love)
+[![прод](https://img.shields.io/website?url=https%3A%2F%2Fstatus.samoy.love&up_message=online&up_color=2ea043&down_message=offline&label=status.samoy.love)](https://status.samoy.love)
 
 Статус-страница сервисов samoy.love — **https://status.samoy.love**
 
