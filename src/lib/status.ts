@@ -285,3 +285,19 @@ export function troubles(data: Summary) {
     .flatMap((p) => p.checks.filter((c) => c.status !== 'up').map((c) => ({ p, c })))
     .sort((a, b) => troubleRank(a.c) - troubleRank(b.c));
 }
+
+/**
+ * Неработающие службы.
+ *
+ * Раньше мёртвый юнит попадал только в раскрытые подробности проекта, а
+ * вердикт не трогал вовсе: страница показывала «Все системы работают» ровно
+ * тогда, когда бот писал владельцу «служба упала». Теперь юнит роняет вердикт
+ * (agent/main.go, projectStatus), и рядом с вердиктом должно быть видно,
+ * из-за чего он такой, — иначе «есть замечания» без единого замечания на
+ * экране выглядит как сбой самой страницы.
+ */
+export function deadUnits(data: Summary) {
+  return data.projects.flatMap((p) =>
+    (p.units ?? []).filter((u) => !u.active).map((u) => ({ p, u })),
+  );
+}

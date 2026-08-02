@@ -25,7 +25,14 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const DATA = join(ROOT, 'data');
+
+// Конфиг и каталог данных переопределяются окружением — по той же причине,
+// что и STATUS_SUMMARY_URL ниже: правила оценки написаны здесь и в агенте
+// (agent/main.go), и единственный способ убедиться, что они не разъехались, —
+// прогнать обе реализации по одному набору случаев и сравнить вердикты.
+// См. scripts/conformance.test.mjs.
+const DATA = process.env.STATUS_DATA ?? join(ROOT, 'data');
+const CONFIG_PATH = process.env.STATUS_CONFIG ?? join(ROOT, 'config/status.json');
 
 const TIMEOUT_MS = 12_000;
 const RAW_MS = 7 * 24 * 3600_000;
@@ -425,7 +432,7 @@ async function probeAgent() {
 
 // ---------------------------------------------------------------- основное
 
-const config = JSON.parse(await readFile(join(ROOT, 'config/status.json'), 'utf8'));
+const config = JSON.parse(await readFile(CONFIG_PATH, 'utf8'));
 const state = await readJson(join(DATA, 'state.json'), { services: {} });
 const incidents = await readJson(join(DATA, 'incidents.json'), []);
 if (!state.services) state.services = {};

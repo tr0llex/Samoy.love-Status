@@ -21,8 +21,9 @@ func summaryAt(updated time.Time, status string, since time.Time, unitActive boo
 		Updated: updated.Format(time.RFC3339),
 		Overall: status,
 		Projects: []Project{{
-			ID:    "snakes",
-			Title: "Snakes",
+			ID:     "snakes",
+			Title:  "Snakes",
+			Status: status,
 			Checks: []Check{{
 				ID: "snakes", Name: "Клиент", Status: status,
 				Since: since.Format(time.RFC3339), Error: errText,
@@ -351,5 +352,54 @@ func TestТишинаГлушитТолькоНапоминания(t *testing.T
 	st.Unmute()
 	if muted, _ := st.Muted(now); muted {
 		t.Error("после снятия тишины бот снова говорит")
+	}
+}
+
+func TestСобытияНесутСсылкуИПроект(t *testing.T) {
+	// target.url вычислялся и никуда не попадал: в уведомлениях молча
+	// пропадали ссылки, ради которых их и добавляли.
+	s := summaryAt(base, "down", base, false, "v1")
+	s.Projects[0].URL = "https://snakes.samoy.love/"
+	s.Projects[0].Checks[0].URL = "https://snakes.samoy.love/health"
+
+	st := newState()
+	events := st.Apply(s, base, 15*time.Minute, 5*time.Minute)
+	if len(events) == 0 {
+		t.Fatal("о лежащем сервисе не сообщено")
+	}
+	for _, e := range events {
+		if e.Kind == KindRelease {
+			continue
+		}
+		if e.URL == "" {
+			t.Errorf("событие %s %s без ссылки", e.Kind, e.Key)
+		}
+		if e.Key != "data" && e.Project == "" {
+			t.Errorf("событие %s %s без проекта — кнопка не будет знать, куда вести", e.Kind, e.Key)
+		}
+	}
+}
+
+func TestСообщениеОРелизеВедётНаКомпонент(t *testing.T) {
+	st := newState()
+	first := summaryAt(base, "up", base, true, "v1")
+	first.Projects[0].Builds[0].URL = "https://snakes.samoy.love/version.json"
+	st.Apply(first, base, 15*time.Minute, 5*time.Minute)
+
+	second := summaryAt(base, "up", base, true, "v2")
+	second.Projects[0].Builds[0].URL = "https://snakes.samoy.love/version.json"
+	events := st.Apply(second, base, 15*time.Minute, 5*time.Minute)
+
+	var seen bool
+	for _, e := range events {
+		if e.Kind == KindRelease {
+			seen = true
+			if e.URL != "https://snakes.samoy.love/version.json" {
+				t.Errorf("релиз ведёт на %q, а не на обновившийся компонент", e.URL)
+			}
+		}
+	}
+	if !seen {
+		t.Fatal("смена версии не превратилась в событие")
 	}
 }

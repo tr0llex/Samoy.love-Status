@@ -64,10 +64,13 @@ test.describe('страница статуса', () => {
     // Сломанное вынесено отдельным блоком выше проектов: искать красную
     // строку среди зелёных не должно быть нужно.
     const alerts = page.locator('.alert');
-    await expect(alerts).toHaveCount(1);
+    // Упавшая проверка и следом мёртвая служба того же проекта: она не видна
+    // пользователю напрямую, но вердикт роняет, и молчать о ней нельзя.
+    await expect(alerts).toHaveCount(2);
     await expect(alerts.first()).toContainText('connect ECONNREFUSED');
     // Что это значит для пользователя — главное, ради чего сюда приходят.
     await expect(alerts.first().locator('.alert-impact')).toBeVisible();
+    await expect(alerts.last()).toContainText('служба не работает');
 
     const broken = page.locator('.proj').nth(1);
     await expect(broken).toHaveClass(/degraded/);
@@ -182,5 +185,23 @@ test.describe('данные, на которых страница обычно �
     const noise = problems.console.filter((entry) => !/Failed to load resource.*500/.test(entry));
     expect(noise, 'страница не пережила недоступность данных').toEqual([]);
     problems.console.length = 0;
+  });
+});
+
+test.describe('мёртвая служба', () => {
+  test('роняет вердикт и видна рядом с ним', async ({ page }) => {
+    // Юниты не входили в вердикт вовсе: бот писал владельцу «служба упала»,
+    // а страница в ту же минуту показывала «Все системы работают». Два ответа
+    // на один вопрос — худшее, что может делать статус-страница.
+    await serve(page, fixture('unit-down'));
+    await page.goto('/');
+    await waitRendered(page);
+
+    await expect(page.locator('#hero-title')).not.toHaveText('Все системы работают');
+
+    const alerts = page.locator('#alerts');
+    await expect(alerts).toBeVisible();
+    await expect(alerts).toContainText('Игровой сервер');
+    await expect(alerts).toContainText('служба не работает');
   });
 });

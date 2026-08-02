@@ -100,6 +100,7 @@ const DATA_URL = import.meta.env.PUBLIC_DATA_URL ?? '/data/summary.json';
     safeColor,
     safeUrl,
     troubles,
+    deadUnits,
     uptimeOf,
   } from '../lib/status';
   import { trackEvent } from '../lib/events';
@@ -392,9 +393,13 @@ const DATA_URL = import.meta.env.PUBLIC_DATA_URL ?? '/data/summary.json';
     // критичное, потом медленное, потом второстепенное. Второстепенное
     // показываем всегда — вердикт оно не роняет, но знать о нём надо.
     const bad = troubles(data);
+    // Мёртвые службы идут последними: пользователю их не видно напрямую, но
+    // вердикт они роняют, и без строки на экране «есть замечания» выглядело
+    // бы замечанием без причины.
+    const dead = deadUnits(data);
     const alerts = el('alerts');
-    alerts.hidden = bad.length === 0;
-    if (bad.length) {
+    alerts.hidden = bad.length === 0 && dead.length === 0;
+    if (bad.length || dead.length) {
       el('alert-list').innerHTML = bad
         .map(({ p, c }) => {
           const tone = c.status === 'down' ? (c.critical ? 'down' : 'aux') : 'slow';
@@ -416,6 +421,22 @@ const DATA_URL = import.meta.env.PUBLIC_DATA_URL ?? '/data/summary.json';
             <span class="alert-since mono"${exactAttr(c.since)}>${esc(what)} ${esc(elapsed(c.since))}</span>
           </li>`;
         })
+        .concat(
+          dead.map(
+            ({ p, u }) => `<li class="alert aux">
+            <span class="dot down" aria-hidden="true"></span>
+            <span class="alert-what">
+              <b>${esc(p.title)} · ${esc(u.title)}</b>
+              <span class="alert-why mono">${esc(u.state ?? 'состояние неизвестно')}</span>
+            </span>
+            <span class="alert-since mono"${exactAttr(u.since)}>${
+              // У остановленной службы времени запуска может не быть вовсе —
+              // тогда говорим только факт, без выдуманной длительности.
+              u.since ? `служба не работает ${esc(elapsed(u.since))}` : 'служба не работает'
+            }</span>
+          </li>`,
+          ),
+        )
         .join('');
     }
 

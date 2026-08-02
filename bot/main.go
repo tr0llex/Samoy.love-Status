@@ -135,7 +135,7 @@ func main() {
 			}
 
 			for _, e := range events {
-				if err := tg.SendWith(ctx, cfg.Owner, formatEvent(e), alertKeyboard()); err != nil {
+				if err := tg.SendWith(ctx, cfg.Owner, formatEvent(e), alertKeyboard(e.Project)); err != nil {
 					metrics.sendFailed()
 					log.Printf("уведомление не отправлено (%s %s): %v", e.Kind, e.Key, err)
 					continue
@@ -211,7 +211,7 @@ func sendCurrentStatus(ctx context.Context, tg *Telegram, owner int64, summaryPa
 	if err != nil {
 		return err
 	}
-	return tg.SendWith(ctx, owner, formatStatus(s, time.Now().UTC()), navKeyboard(ViewStatus))
+	return tg.SendWith(ctx, owner, formatStatus(s, time.Now().UTC()), statusKeyboard(s))
 }
 
 // handleUpdate отвечает на одно сообщение.
@@ -246,8 +246,8 @@ func handleUpdate(ctx context.Context, tg *Telegram, u Update, owner int64, self
 	log.Printf("команда /%s", cmd)
 
 	view := viewOf(cmd)
-	text := renderView(view, summaryPath, time.Now().UTC())
-	if err := tg.SendWith(ctx, owner, text, navKeyboard(view)); err != nil {
+	text, kb := renderView(view, summaryPath, time.Now().UTC())
+	if err := tg.SendWith(ctx, owner, text, kb); err != nil {
 		metrics.sendFailed()
 		log.Printf("ответ на /%s не отправлен: %v", cmd, err)
 	}

@@ -239,12 +239,17 @@ type OutProject struct {
 	Total int `json:"total"`
 	// Сколько второстепенных проверок не в порядке. Вердикт они не роняют, но
 	// умолчать о них тоже нельзя — иначе сломанная админка выглядит как ничто.
-	AuxDown int        `json:"auxDown"`
-	AuxSlow int        `json:"auxSlow"`
-	Slow    int        `json:"slow"`
-	Checks  []OutCheck `json:"checks"`
-	Units   []OutUnit  `json:"units"`
-	Builds  []OutBuild `json:"builds"`
+	AuxDown int `json:"auxDown"`
+	AuxSlow int `json:"auxSlow"`
+	Slow    int `json:"slow"`
+	// Сколько служб не работает. Считается отдельно от проверок: юнит может
+	// лежать, пока запросы всё ещё обслуживаются (кэш, вторая реплика,
+	// фоновый обработчик без своего HTTP), — но состоянием «всё хорошо»
+	// это уже не является.
+	UnitsDown int        `json:"unitsDown"`
+	Checks    []OutCheck `json:"checks"`
+	Units     []OutUnit  `json:"units"`
+	Builds    []OutBuild `json:"builds"`
 }
 
 type Summary struct {
@@ -939,6 +944,9 @@ func main() {
 		for _, u := range p.Units {
 			ou := unitState(u.Name)
 			ou.Title = u.Title
+			if !ou.Active {
+				op.UnitsDown++
+			}
 			op.Units = append(op.Units, ou)
 		}
 		for _, b := range p.Builds {
@@ -994,16 +1002,23 @@ func main() {
 	}
 }
 
-// projectStatus — вердикт по критичным проверкам.
+// projectStatus — вердикт по критичным проверкам и состоянию служб.
 //
-// Второстепенные проверки статус не меняют: они видны на странице и считаются
-// в AuxDown, но админка, недоступная для публикации, не должна выглядеть как
-// проблема у пользователей, которых она не касается.
+// Второстепенные проверки статус не роняют до «лежит»: они видны на странице
+// и считаются в AuxDown, но админка, недоступная для публикации, не должна
+// выглядеть как проблема у пользователей, которых она не касается.
+//
+// Мёртвая служба, наоборот, вердикт меняет. Раньше юниты в него не входили
+// вовсе, и получалось так: бот будил владельца сообщением «служба упала»,
+// а страница в ту же минуту показывала «Все системы работают». Два ответа на
+// один вопрос — худшее, что может делать статус-страница. Роняем именно до
+// «частично»: запросы в этот момент часто ещё обслуживаются, и говорить
+// «лежит» было бы таким же враньём, только в другую сторону.
 func projectStatus(op OutProject) string {
 	switch {
 	case op.Total == 0:
 		// Критичных проверок нет вовсе — судить не по чему.
-		if op.AuxDown > 0 {
+		if op.AuxDown > 0 || op.UnitsDown > 0 {
 			return "degraded"
 		}
 		return statusUp
@@ -1012,6 +1027,8 @@ func projectStatus(op OutProject) string {
 	case op.Up < op.Total:
 		return "degraded"
 	case op.Slow > 0:
+		return "degraded"
+	case op.UnitsDown > 0:
 		return "degraded"
 	}
 	return statusUp
@@ -1024,15 +1041,19 @@ func projectStatus(op OutProject) string {
 // моргнувшая второстепенная проверка. Теперь смотрим на долю лежащих
 // критичных проверок.
 func overallStatus(projects []OutProject) string {
-	var critical, down, slow, auxDown int
+	var critical, down, slow, auxDown, unitsDown int
 	for _, p := range projects {
 		critical += p.Total
 		down += p.Total - p.Up
 		slow += p.Slow
 		auxDown += p.AuxDown
+		unitsDown += p.UnitsDown
 	}
 	switch {
 	case critical == 0:
+		if unitsDown > 0 || auxDown > 0 {
+			return "degraded"
+		}
 		return "operational"
 	case down == critical:
 		return "down"
@@ -1040,7 +1061,7 @@ func overallStatus(projects []OutProject) string {
 		return "major"
 	case down > 0:
 		return "degraded"
-	case slow > 0 || auxDown > 0:
+	case slow > 0 || auxDown > 0 || unitsDown > 0:
 		return "degraded"
 	}
 	return "operational"

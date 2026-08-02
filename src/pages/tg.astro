@@ -62,6 +62,7 @@ const DATA_URL = import.meta.env.PUBLIC_DATA_URL ?? '/data/summary.json';
         relTime,
         safeColor,
         troubles,
+        deadUnits,
         uptimeOf,
         worstDays,
       } from '../lib/status';
@@ -137,7 +138,10 @@ const DATA_URL = import.meta.env.PUBLIC_DATA_URL ?? '/data/summary.json';
         el('fact-updated').textContent = relTime(data.updated);
 
         const bad = troubles(data);
-        el('alerts').hidden = bad.length === 0;
+        // Мёртвые службы — там же, где проверки: вердикт они роняют наравне,
+        // и в мини-приложении это должно читаться так же, как на странице.
+        const dead = deadUnits(data);
+        el('alerts').hidden = bad.length === 0 && dead.length === 0;
         el('alerts').innerHTML = bad
           .map(
             ({ p, c }) => `<li class="alert ${c.status === 'down' ? (c.critical ? 'down' : 'aux') : 'slow'}">
@@ -145,6 +149,14 @@ const DATA_URL = import.meta.env.PUBLIC_DATA_URL ?? '/data/summary.json';
               ${c.impact && c.status === 'down' ? `<span class="imp">${esc(c.impact)}</span>` : ''}
               <span class="why">${esc(c.error || '')}</span>
             </li>`,
+          )
+          .concat(
+            dead.map(
+              ({ p, u }) => `<li class="alert aux">
+              <b>${esc(p.title)} · ${esc(u.title)}</b>
+              <span class="why">служба не работает — ${esc(u.state ?? 'состояние неизвестно')}</span>
+            </li>`,
+            ),
           )
           .join('');
 
