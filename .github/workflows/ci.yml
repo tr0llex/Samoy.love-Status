@@ -179,7 +179,7 @@ jobs:
     # Проверка после выкатки смотрит на код ответа. Статус-страница отдаёт 200
     # даже когда данных нет, скрипт упал на неожиданном поле и на экране пусто.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
