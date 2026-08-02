@@ -159,7 +159,7 @@ func TestBuildInfoFile(t *testing.T) {
 	if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got := buildInfo(Build{Title: "Сайт", Type: "file", Path: f})
+	got := buildInfo(Build{Title: "Сайт", Type: "file", Path: f}, &http.Client{Timeout: httpTimeout})
 	if got.At == "" {
 		t.Error("для файла должна определяться дата выкатки")
 	}
@@ -178,7 +178,7 @@ func TestBuildInfoRelease(t *testing.T) {
 	if err := os.Symlink(release, link); err != nil {
 		t.Skipf("символические ссылки недоступны в этой среде: %v", err)
 	}
-	got := buildInfo(Build{Title: "Сервер", Type: "release", Path: link})
+	got := buildInfo(Build{Title: "Сервер", Type: "release", Path: link}, &http.Client{Timeout: httpTimeout})
 	if got.Version != "20260801-225039-5486b2d" {
 		t.Errorf("версия берётся из имени каталога релиза, получили %q", got.Version)
 	}
@@ -187,10 +187,42 @@ func TestBuildInfoRelease(t *testing.T) {
 	}
 }
 
+func TestBuildInfoFromVersionURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"version":"20260802-010203-abc1234","commit":"abc1234","builtAt":"2026-08-02T01:02:03Z"}`))
+	}))
+	defer srv.Close()
+
+	got := buildInfo(Build{Title: "Сайт", Type: "url", Path: srv.URL}, srv.Client())
+	if got.Version != "20260802-010203-abc1234" {
+		t.Errorf("версию берём из ответа сервиса, получили %q", got.Version)
+	}
+	if got.At != "2026-08-02T01:02:03Z" {
+		t.Errorf("время сборки берём оттуда же, получили %q", got.At)
+	}
+}
+
+func TestBuildInfoVersionURLUnavailable(t *testing.T) {
+	// Сервис лежит или ещё не отдаёт version.json — агент обязан пережить
+	// это молча и показать остальные проекты, а не свалиться целиком.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer srv.Close()
+
+	got := buildInfo(Build{Title: "Сайт", Type: "url", Path: srv.URL}, srv.Client())
+	if got.Version != "" || got.At != "" {
+		t.Errorf("при недоступности ожидались пустые поля, получили %+v", got)
+	}
+	if got.Title != "Сайт" {
+		t.Error("название должно оставаться — строка на странице не исчезает")
+	}
+}
+
 func TestBuildInfoMissingPathIsNotFatal(t *testing.T) {
 	// Сервис может быть ещё не выкачен — агент обязан пережить это молча,
 	// а не падать и лишать страницу всех остальных данных.
-	got := buildInfo(Build{Title: "Нет такого", Type: "file", Path: "/no/such/path"})
+	got := buildInfo(Build{Title: "Нет такого", Type: "file", Path: "/no/such/path"}, &http.Client{Timeout: httpTimeout})
 	if got.Version != "" || got.At != "" {
 		t.Error("для отсутствующего пути ожидались пустые поля")
 	}

@@ -68,12 +68,13 @@ type Unit struct {
 }
 
 // Build описывает, откуда брать дату выкатки и версию.
-//   - type "file"    — берём время изменения файла (бинарь, index.html)
+//   - type "url"     — /version.json, который кладёт общий пайплайн: самый
+//     точный источник, потому что отвечает сам работающий сервис, а не диск
 //   - type "release" — путь это симлинк на каталог релиза; его имя и есть версия
+//   - type "file"    — только время изменения файла, версии нет
 //
-// Когда во всех сервисах появится /version.json (задача общего пайплайна),
-// сюда добавится третий тип и версии станут точными для всех, а не только
-// для тех, у кого релизы разложены каталогами.
+// "url" появился, когда все проекты переехали на deploy-kit: до этого версия
+// была известна лишь там, где релизы разложены каталогами.
 type Build struct {
 	Title string `json:"title"`
 	Type  string `json:"type"`
@@ -291,9 +292,28 @@ func unitState(name string) OutUnit {
 	return out
 }
 
-func buildInfo(b Build) OutBuild {
+func buildInfo(b Build, client *http.Client) OutBuild {
 	out := OutBuild{Title: b.Title}
 	switch b.Type {
+	case "url":
+		// Отвечает сам сервис — значит, показана версия того, что реально
+		// работает, а не того, что лежит на диске.
+		resp, err := client.Get(b.Path)
+		if err != nil {
+			return out
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return out
+		}
+		var v struct {
+			Version string `json:"version"`
+			BuiltAt string `json:"builtAt"`
+		}
+		if json.NewDecoder(resp.Body).Decode(&v) == nil {
+			out.Version = v.Version
+			out.At = v.BuiltAt
+		}
 	case "release":
 		// Симлинк вида current -> releases/20260801-225039-5486b2d:
 		// имя каталога и есть версия — дата плюс короткий коммит.
@@ -541,7 +561,7 @@ func main() {
 			op.Units = append(op.Units, ou)
 		}
 		for _, b := range p.Builds {
-			op.Builds = append(op.Builds, buildInfo(b))
+			op.Builds = append(op.Builds, buildInfo(b, client))
 		}
 		switch {
 		case op.Up == op.Total:
