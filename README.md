@@ -3,7 +3,6 @@
 [![CI](https://github.com/tr0llex/Samoy.love-Status/actions/workflows/ci.yml/badge.svg)](https://github.com/tr0llex/Samoy.love-Status/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/tr0llex/Samoy.love-Status/branch/main/graph/badge.svg)](https://codecov.io/gh/tr0llex/Samoy.love-Status)
 
-
 Статус-страница сервисов samoy.love — **https://status.samoy.love**
 
 ## Как устроено
@@ -48,10 +47,8 @@ src/                 страница (Astro)
 метрик, обновление агента не ждёт пересборки статики.
 
 ```bash
-# из GitHub Actions: Actions -> Deploy -> Run workflow (both | site | agent)
-# локально тем же контрактом:
-deploy-kit/bin/deploy --config .deploy-kit/site.env
-deploy-kit/bin/deploy --config .deploy-kit/agent.env
+dk deploy status-site status-agent   # локально, тем же путём, что и CI
+dk rollback status-site --list
 ```
 
 Раскладка на сервере: релизы в `<корень>/releases/<версия>`, рабочая версия —
@@ -59,12 +56,7 @@ deploy-kit/bin/deploy --config .deploy-kit/agent.env
 `/opt/status-agent`, systemd-юнит запускает его через `current` и потому не
 правится при выкатке.
 
-Откат без пересборки:
-
-```bash
-ssh ubuntu@<host> 'sudo /opt/deploy-kit/rollback.sh --app status-site --root /var/www/status --list'
-ssh ubuntu@<host> 'sudo /opt/deploy-kit/rollback.sh --app status-site --root /var/www/status --nginx-reload'
-```
+Откат идёт без пересборки: релизы уже лежат на сервере.
 
 Данные проверок лежат в `/var/www/status/data` — **вне** каталога релизов,
 поэтому история переживает любую выкатку.
@@ -79,13 +71,14 @@ sudo install -m 0644 config/status.json /etc/status-agent/status.json
 sudo install -m 0644 deploy/systemd/status-agent.{service,timer} /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now status-agent.timer
 
-sudo install -m 0644 deploy/nginx/status.samoy.love.conf /etc/nginx/sites-available/
-sudo ln -sfn /etc/nginx/sites-available/status.samoy.love.conf /etc/nginx/sites-enabled/
 sudo certbot certonly --webroot -w /var/www/status-acme -d status.samoy.love
-sudo nginx -t && sudo systemctl reload nginx
 ```
 
 ## Внешний сторож
+
+Пробер `probe.yml` ходит по сервисам из GitHub Actions, а не с сервера, — и это
+намеренно: агент на упавшем хосте не может сообщить, что хост упал. Данные
+пробер пишет в ветку `status-data`.
 
 Секреты репозитория: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
 Проверить канал: запустить workflow `probe` вручную с галкой `notify_test` —
