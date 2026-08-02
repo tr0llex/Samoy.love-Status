@@ -32,7 +32,7 @@ export function trackEvent(event: SiteEvent): void {
 
   try {
     if (typeof navigator.sendBeacon === 'function') {
-      navigator.sendBeacon(url, new Blob([], { type: 'text/plain' }));
+      navigator.sendBeacon(url);
       return;
     }
     if (typeof fetch === 'function') {
