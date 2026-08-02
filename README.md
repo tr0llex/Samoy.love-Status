@@ -1,218 +1,208 @@
 # status.samoy.love
 
-English · [Русский](README.ru.md)
+Русский · [English](README.en.md)
 
 [![CI](https://github.com/tr0llex/status.samoy.love/actions/workflows/ci.yml/badge.svg)](https://github.com/tr0llex/status.samoy.love/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/tr0llex/status.samoy.love/branch/main/graph/badge.svg)](https://codecov.io/gh/tr0llex/status.samoy.love)
-[![prod](https://img.shields.io/website?url=https%3A%2F%2Fstatus.samoy.love&up_message=online&up_color=2ea043&down_message=offline&label=status.samoy.love)](https://status.samoy.love)
+[![прод](https://img.shields.io/website?url=https%3A%2F%2Fstatus.samoy.love&up_message=online&up_color=2ea043&down_message=offline&label=status.samoy.love)](https://status.samoy.love)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-The status page for the [samoy.love](https://samoy.love) services — live at
-**[status.samoy.love](https://status.samoy.love)**: uptime, versions and
-incidents for visitors who need to know whether the service is down or their
-own connection is.
+Статус-страница сервисов [samoy.love](https://samoy.love) — вживую на
+**[status.samoy.love](https://status.samoy.love)**: аптайм, версии и инциденты
+для посетителей, которым нужно понять, лежит сервис или лежит их интернет.
 
-Five projects share one host, and sooner or later everyone asks "it does not
-open for me — is that you or me?". Answering that by hand, after the fact, is a
-poor plan, so the answer is computed continuously: an agent walks the services
-every minute, an external watchdog does the same from the outside, and a
-Telegram bot wakes the owner before a user does.
+Пять проектов на одном хосте, и вопрос «у меня не открывается — это вы или
+я?» рано или поздно задаёт каждый. Отвечать на него постфактум и вручную —
+плохая идея, поэтому ответ считается сам: агент обходит сервисы раз в минуту,
+внешний сторож делает то же самое снаружи, а бот в Telegram будит владельца
+раньше, чем это сделает пользователь.
 
-<img src="docs/img/page.svg" alt="Status page" width="100%">
+<img src="docs/img/page.svg" alt="Страница статуса" width="100%">
 
-## How it works
+## Как устроено
 
 ```mermaid
 flowchart LR
-    subgraph host["single host"]
-        svc["services<br/>Launcher · Snakes<br/>Metro · Card · Status"]
-        agent["agent<br/>Go, every minute"]
+    subgraph host["один хост"]
+        svc["сервисы<br/>Лаунчер · Змейки<br/>Метро · Визитка · Статус"]
+        agent["агент<br/>Go, раз в минуту"]
         json[("summary.json")]
-        page["page<br/>Astro"]
-        bot["bot<br/>Telegram"]
-        agent -->|probes| svc
+        page["страница<br/>Astro"]
+        bot["бот<br/>Telegram"]
+        agent -->|проверяет| svc
         agent --> json
         json --> page
         json --> bot
     end
-    watch["external watchdog<br/>GitHub Actions"]
-    watch -->|probes from outside| svc
-    watch -->|is the agent alive| json
+    watch["внешний сторож<br/>GitHub Actions"]
+    watch -->|проверяет снаружи| svc
+    watch -->|жив ли агент| json
 ```
 
-**The watchdog lives in GitHub Actions rather than on the server, and that is
-the central decision of this repository.** An agent on a downed host cannot
-report that the host is down: the services take the page, the bot and the probe
-loop with them. So the same endpoints are walked in parallel by the `probe`
-workflow (`scripts/probe.mjs`) — every five minutes, the finest cron interval
-GitHub offers, with five one-minute passes inside a single run so the gap
-between runs is closed from within. Its history is committed to a separate
-[`status-data`](https://github.com/tr0llex/status.samoy.love/tree/status-data)
-branch: five commits an hour would bury the actual code changes in `main`.
+**Сторож живёт в GitHub Actions, а не на сервере — и это главное решение
+репозитория.** Агент на упавшем хосте не может сообщить, что хост упал:
+вместе с сервисами исчезают и страница, и бот, и сам обход. Поэтому те же
+эндпоинты параллельно обходит воркфлоу `probe` (`scripts/probe.mjs`) — раз в
+пять минут, минимальный интервал cron у GitHub, и пять обходов с минутным
+шагом внутри одного запуска, чтобы окно между запусками закрывалось изнутри.
+Историю он коммитит в отдельную ветку
+[`status-data`](https://github.com/tr0llex/status.samoy.love/tree/status-data):
+пять коммитов в час в `main` похоронили бы правки кода.
 
-**The agent (`agent/`, Go) lives on the host itself, because otherwise the
-important part is invisible.** Systemd unit states, deployed versions and
-release dates can only be seen from inside; the agent runs as a oneshot on a
-one-minute timer, accumulates history and writes a ready-made `summary.json`
-next to the page. There is no long-lived process — hence no HTTP endpoint
-either, and metrics are exported as a file for the node_exporter textfile
-collector: between runs nobody is left to listen on a port, but a file survives
-the pause.
+**Агент (`agent/`, Go) живёт на самом хосте, потому что иначе не увидеть
+главного.** Systemd-юниты, выкаченные версии и даты релизов видны только
+изнутри; агент запускается таймером раз в минуту как oneshot, копит историю и
+складывает готовый `summary.json` рядом со страницей. Постоянного процесса
+нет — HTTP-эндпоинта у него тоже нет, и метрики он выгружает файлом для
+textfile-коллектора node_exporter: между запусками слушать порт некому, а файл
+паузу переживает.
 
-**The bot (`bot/`, Go) runs no checks of its own — it reads the same
-`summary.json`.** Two independent probe loops would drift apart, and deciding
-which one to believe would fall to a human. The voice is split between the bot
-and the watchdog explicitly: while the data stays fresh the bot reports outages
-(it is restarted by systemd and knows more — units, versions, reminders about
-an ongoing outage), and the moment the agent goes silent the watchdog speaks.
-The dead-man switch deliberately exists in both: the bot sees a stale file
-locally (a five-minute threshold), the watchdog sees the absence of fresh data
-from outside (ten minutes; anything lower would produce false alarms given a
-five-minute cron).
+**Бот (`bot/`, Go) своих проверок не делает — он читает тот же
+`summary.json`.** Два независимых обхода расходились бы во времени, и решать,
+кому верить, пришлось бы человеку. Голос между ботом и сторожем разделён явно:
+пока данные свежие, о падениях пишет бот (он перезапускается systemd и знает
+больше — юниты, версии, напоминания о длящемся простое), а как только агент
+замолчал, говорит сторож. Дед-мэн намеренно есть у обоих: бот видит несвежий
+файл локально (порог 5 минут), сторож — отсутствие свежих данных снаружи
+(10 минут, ниже давало бы ложные тревоги при cron раз в пять минут).
 
-**HTTP 200 proves nothing on its own.** A service answers 200 with a "database
-unavailable" page, with an empty body, after eight seconds, or with a redirect
-to an unrelated host that also answered 200. So a check is described more
-broadly (`config/status.json`, 11 checks across five projects): a marker in the
-body, `Content-Type`, a latency threshold, the final host after redirects, a
-criticality flag and the user-facing consequence of the failure. A project's
-verdict is computed from critical checks only — an internal admin API going
-down should not sound like the game server without which no matches run. A
-failure is accepted only after a repeated request: it is not only the service
-that flickers, but also the road to it.
+**Код 200 сам по себе ничего не доказывает.** Сервис отвечает 200 страницей
+«база данных недоступна», пустым телом, за восемь секунд или редиректом на
+посторонний хост, который тоже ответил 200. Поэтому проверка описывается шире
+(`config/status.json`, 11 проверок на пять проектов): маркер в теле,
+`Content-Type`, порог времени, конечный хост после редиректов, признак
+критичности и текст последствия для пользователя. Вердикт проекта считается
+только по критичным проверкам — падение внутренней админки не должно звучать
+как падение игрового сервера, без которого не идут матчи. Сбой признаётся
+после повторного запроса: моргает не только сервис, но и дорога до него.
 
-**Uptime is computed over a calendar window, not over the number of accumulated
-buckets.** A bucket appears only when the agent ran, so taking the last ninety
-buckets for "90 days" quietly stretched the window to ninety-seven days — and
-agent downtime even improved the number, because it contained no failed probes.
-Days without measurements now stay as gaps, both on the bar and in the
-arithmetic. For the same reason the page shows a separate grey "data is stale"
-state when `updated` is older than five minutes: a frozen agent must not look
-like "everything works".
+**Аптайм считается по календарному окну, а не по числу накопленных корзин.**
+Корзина заводится, только когда агент отработал, поэтому «за 90 дней» из
+последних девяноста корзин незаметно растягивало окно на девяносто семь суток,
+а простой агента ещё и улучшал цифру — плохих замеров в нём не было. Сутки без
+замеров остаются дырками и на шкале, и в счёте. По той же причине страница
+показывает отдельное серое «данные устарели», если `updated` старше пяти
+минут: замерший агент не должен выглядеть как «всё работает».
 
-<img src="docs/img/uptime.svg" alt="90-day availability bar" width="100%">
+<img src="docs/img/uptime.svg" alt="Шкала доступности за 90 дней" width="100%">
 
-The bot answers the owner only and ignores everyone else in silence — any reply
-to a stranger confirms that the bot is alive and listening. Screens are
-switched by editing the same message rather than sending a new one, otherwise a
-week of use turns the chat into a feed of fifty near-identical cards. The
-"Open" button shows a separate compact build of the page inside Telegram
-(`src/pages/tg.astro`), while the logic of what the data means is shared with
-the full page (`src/lib/status.ts`) — the verdicts in a browser and in a
-messenger must not drift apart.
+Бот отвечает только владельцу, чужие сообщения игнорирует молча — любой ответ
+незнакомцу подтверждает, что бот жив и слушает. Экраны переключаются правкой
+того же сообщения, а не новым: иначе за неделю чат превращается в ленту из
+полусотни почти одинаковых карточек. Кнопка «Открыть» показывает отдельную
+компактную версию страницы внутри Telegram (`src/pages/tg.astro`), а логика
+«что означают эти данные» общая с большой страницей (`src/lib/status.ts`) —
+разъезжаться вердикты в браузере и в мессенджере не должны.
 
-<img src="docs/img/telegram.svg" alt="Bot and mini app" width="380">
+<img src="docs/img/telegram.svg" alt="Бот и мини-приложение" width="380">
 
-## Stack
+## Стек
 
 `Go 1.25` · `Astro 7` · `TypeScript` · `Node` · `GitHub Actions` · `systemd` ·
 `Prometheus (textfile)` · `Playwright` · `nginx`
 
-## Quick start
+## Быстрый старт
 
-Node 24 and Go 1.25.
+Node 24 и Go 1.25.
 
 ```bash
 npm install
-npm run dev                                              # the page
+npm run dev                                              # страница
 
 cd agent && go run . -config ../config/status.json -data ../tmp-data
 
-# The bot needs a token, a chat id and data the agent has already collected.
+# Боту нужны токен, chat id и уже собранные агентом данные.
 cd bot && TELEGRAM_BOT_TOKEN=… TELEGRAM_CHAT_ID=… \
   go run . -data ../tmp-data -state ../tmp-data/bot-state.json
 
-node scripts/probe.mjs                                   # external watchdog
-npm run e2e                                              # end-to-end tests
+node scripts/probe.mjs                                   # внешний сторож
+npm run e2e                                              # сквозные тесты
 ```
 
-## Structure
+## Структура
 
-| Path                    | Purpose                                                         |
-| ----------------------- | --------------------------------------------------------------- |
-| `agent/`                | agent: probes, systemd, versions, history, metrics              |
-| `bot/`                  | Telegram bot: commands, buttons, notifications, dead-man switch |
-| `scripts/probe.mjs`     | external watchdog, run from GitHub Actions                      |
-| `config/status.json`    | the single check config, read by agent and watchdog             |
-| `src/pages/index.astro` | the status page                                                 |
-| `src/pages/tg.astro`    | compact build for the Telegram mini app                         |
-| `src/lib/status.ts`     | verdict logic shared by both builds of the page                 |
-| `e2e/`                  | Playwright scenarios and the `fixtures/` data sets              |
-| `deploy/systemd/`       | units and the agent timer                                       |
-| `docs/CONFIG.md`        | how a check is described and what is configured now (Russian)   |
-| `docs/DEPLOY.md`        | deployment, provisioning, running locally (Russian)             |
-| `.deploy-kit/*.env`     | three deployment targets: page, agent, bot                      |
+| Путь                    | Назначение                                               |
+| ----------------------- | -------------------------------------------------------- |
+| `agent/`                | агент: обход проверок, systemd, версии, история, метрики |
+| `bot/`                  | телеграм-бот: команды, кнопки, уведомления, дед-мэн      |
+| `scripts/probe.mjs`     | внешний сторож, запускается из GitHub Actions            |
+| `config/status.json`    | единый конфиг проверок для агента и сторожа              |
+| `src/pages/index.astro` | страница статуса                                         |
+| `src/pages/tg.astro`    | компактная версия для мини-приложения Telegram           |
+| `src/lib/status.ts`     | общая логика вердиктов для обеих версий страницы         |
+| `e2e/`                  | сценарии Playwright и наборы данных `fixtures/`          |
+| `deploy/systemd/`       | юниты и таймер агента и бота                             |
+| `docs/CONFIG.md`        | как описывается проверка и что настроено сейчас          |
+| `docs/DEPLOY.md`        | выкатка, первичная настройка, локальный запуск           |
+| `.deploy-kit/*.env`     | три цели выкатки: страница, агент, бот                   |
 
-## Tests
+## Тесты
 
-96 Go tests: 47 for the agent (verdicts, outage scale, failure confirmation,
-systemd parsing, uptime windows, metrics) and 49 for the bot (formatting,
-keyboards, dead-man switch, Telegram delivery). They run with `-race` — both
-services are concurrent, and a race shows up in production at the least
-convenient moment. Coverage goes to Codecov under two flags.
+96 Go-тестов: 47 у агента (вердикты, масштаб сбоя, подтверждение сбоя,
+разбор systemd, окна аптайма, метрики) и 49 у бота (форматирование, кнопки,
+дед-мэн, отправка в Telegram). Прогон идёт с `-race` — и агент, и бот работают
+конкурентно, а гонка проявляется на проде в самый неудобный момент. Покрытие
+уезжает в Codecov двумя флагами.
 
-9 Playwright scenarios against a real build of the page. The data is swapped
-for sets from `e2e/fixtures/` — waiting for production to break in order to
-learn whether the page survives it is a poor plan. The clock is frozen in the
-tests: the page prints relative time, and without that a test would be green
-today and red tomorrow on its own. Two more scenarios (`npm run e2e:prod`) run
-against the live site by hand and catch a silently dead agent: data older than
-an hour is a red run.
+9 сценариев Playwright по настоящей сборке страницы. Данные подменяются
+наборами из `e2e/fixtures/` — ждать, пока прод сам сломается, чтобы узнать,
+переживёт ли это страница, плохой план. Часы в тестах зафиксированы: страница
+печатает относительное время, иначе тест зеленел бы сегодня и краснел завтра
+сам по себе. Ещё два сценария (`npm run e2e:prod`) идут по живому сайту руками
+и ловят молча умерший агент: данные старше часа — красный прогон.
 
-Every end-to-end test carries the same guard: any browser console error and any
-failed network request fails it. A status page returns 200 even when its script
-died on an unexpected field and the screen is blank.
+Во всех сквозных тестах работает один и тот же страж: любая ошибка в консоли
+браузера и любой неудачный сетевой запрос валят тест. Статус-страница отдаёт
+200 и когда скрипт упал на неожиданном поле, а на экране пусто.
 
-CI gates a pull request on `go vet`, golangci-lint and `-race` tests for both
-services, ESLint, the format check, types and templates, the page build, a
-parse of `config/status.json` (read by both the agent and the watchdog — a
-syntax error there breaks both at once) and the full end-to-end run. A red gate
-means no release.
+CI гейтит пулл-реквест: `go vet`, golangci-lint и тесты с `-race` для обоих
+сервисов, ESLint, проверка формата, типы и шаблоны, сборка страницы, разбор
+`config/status.json` (его читают и агент, и сторож — синтаксическая ошибка
+ломает обоих разом) и полный сквозной прогон. Красный гейт — выкатки нет.
 
-## Deployment
+## Выкатка
 
-Three independent targets: the page, the agent and the bot. Editing the page
-does not restart data collection, and updating the agent does not wait for a
-static rebuild. A push to `main` rolls out only what changed: a needless
-deployment restarts a unit and resets its uptime for nothing.
+Три независимые цели: страница, агент и бот. Правка страницы не перезапускает
+сбор данных, обновление агента не ждёт пересборки статики. Пуш в `main` катит
+только то, что менялось: лишняя выкатка перезапускает службу и обнуляет аптайм
+на ровном месте.
 
 ```bash
-dk                          # what is on prod right now
-dk deploy status-site       # the page
-dk deploy status-agent      # the agent
-dk deploy samoylove-bot     # the bot
-dk rollback status-agent    # roll back
+dk                          # что сейчас на проде
+dk deploy status-site       # страница
+dk deploy status-agent      # агент
+dk deploy samoylove-bot     # бот
+dk rollback status-agent    # откатить
 ```
 
-The mechanism itself lives in [deploy-kit](https://github.com/tr0llex/deploy-kit),
-nginx configuration included. This repository has no deployment scripts of its
-own.
+Сама механика живёт в [deploy-kit](https://github.com/tr0llex/deploy-kit),
+там же конфигурация nginx. Своих скриптов деплоя в этом репозитории нет.
 
-## Part of samoy.love
+## Часть samoy.love
 
-Not a pile of side projects but one system: one domain, one server, one release
-pipeline, one status page, one monitoring stack.
+Не россыпь пет-проектов, а одна система: один домен, один сервер, один
+релизный пайплайн, одна статус-страница, один мониторинг.
 
-| Project                                                             | What it is                                                | Code                                                                |
-| ------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------- |
-| [samoy.love](https://samoy.love)                                    | personal homepage and showcase                            | [samoy.love](https://github.com/tr0llex/samoy.love)                 |
-| [launcher.samoy.love](https://launcher.samoy.love)                  | ChillHub — a Windows game launcher with diff updates      | [chillhub](https://github.com/tr0llex/chillhub)                     |
-| [snakes.samoy.love](https://snakes.samoy.love)                      | multiplayer territory capture, binary WebSocket protocol  | [snakes](https://github.com/tr0llex/snakes)                         |
-| [metro.samoy.love](https://metro.samoy.love)                        | offline PWA of the Moscow metro map                       | [metro-map](https://github.com/tr0llex/metro-map)                   |
-| [status.samoy.love](https://status.samoy.love)                      | service status: uptime, versions, incidents               | [status.samoy.love](https://github.com/tr0llex/status.samoy.love)   |
-| [metrics.samoy.love](https://github.com/tr0llex/metrics.samoy.love) | monitoring and traffic stats without third-party trackers | [metrics.samoy.love](https://github.com/tr0llex/metrics.samoy.love) |
-| —                                                                   | the shared release pipeline                               | [deploy-kit](https://github.com/tr0llex/deploy-kit)                 |
+| Проект                                                              | Что это                                                       | Код                                                                 |
+| ------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------- |
+| [samoy.love](https://samoy.love)                                    | личная страница и витрина                                     | [samoy.love](https://github.com/tr0llex/samoy.love)                 |
+| [launcher.samoy.love](https://launcher.samoy.love)                  | ChillHub — лаунчер игр для Windows с обновлениями по диффу    | [chillhub](https://github.com/tr0llex/chillhub)                     |
+| [snakes.samoy.love](https://snakes.samoy.love)                      | мультиплеерный захват территории, бинарный WebSocket-протокол | [snakes](https://github.com/tr0llex/snakes)                         |
+| [metro.samoy.love](https://metro.samoy.love)                        | офлайн-PWA со схемой московского метро                        | [metro-map](https://github.com/tr0llex/metro-map)                   |
+| [status.samoy.love](https://status.samoy.love)                      | состояние сервисов: аптайм, версии, инциденты                 | [status.samoy.love](https://github.com/tr0llex/status.samoy.love)   |
+| [metrics.samoy.love](https://github.com/tr0llex/metrics.samoy.love) | мониторинг и посещаемость без трекеров                        | [metrics.samoy.love](https://github.com/tr0llex/metrics.samoy.love) |
+| —                                                                   | общий релизный пайплайн                                       | [deploy-kit](https://github.com/tr0llex/deploy-kit)                 |
 
-The split with the monitoring next door is simple: the status page looks
-outward, for visitors; monitoring looks inward, for the owner. The agent here
-hands its metrics over through the node_exporter textfile collector.
+Разделение с соседним мониторингом простое: статус-страница смотрит наружу,
+для посетителей; мониторинг — внутрь, для владельца. Агент отсюда отдаёт туда
+метрики через textfile-коллектор node_exporter.
 
-## Contacts and licence
+## Контакты и лицензия
 
 [alex@samoy.love](mailto:alex@samoy.love) · [t.me/tr0llex](https://t.me/tr0llex) ·
 [github.com/tr0llex](https://github.com/tr0llex)
 
-This is personal infrastructure and the repository is meant for reading: pull
-requests are not expected, questions are welcome.
+Это личная инфраструктура, и репозиторий читательский: PR не ожидаются,
+вопросы — пожалуйста.
 
-[MIT](LICENSE) © 2026 Alexey Samoylov
+[MIT](LICENSE) © 2026 Алексей Самойлов
