@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+jobs:
+  agent:
+    name: Агент (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+
+      - name: go vet
+        working-directory: agent
+        run: go vet ./...
+
+      - name: Тесты
+        working-directory: agent
+        run: go test ./... -race -coverprofile=coverage.out -covermode=atomic
+
+      - name: Отправить покрытие в Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: agent/coverage.out
+          flags: agent
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+  page:
+    name: Страница
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+      # Конфиг читают и агент, и внешний сторож — синтаксическая ошибка
+      # в нём ломает обоих разом.
+      - name: Проверить конфиг проверок
+        run: node -e "const c=require('./config/status.json'); if(!c.projects?.length) throw new Error('в конфиге нет проектов'); for(const p of c.projects){ if(!p.checks?.length) throw new Error('у проекта '+p.id+' нет проверок'); }"
