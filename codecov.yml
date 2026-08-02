@@ -33,14 +33,14 @@ flags:
     carryforward: true
 
 ignore:
-  - "src/**"
-  - "e2e/**"
-  - "scripts/**"
-  - "docs/**"
-  - "public/**"
-  - "config/**"
-  - "data/**"
+  - 'src/**'
+  - 'e2e/**'
+  - 'scripts/**'
+  - 'docs/**'
+  - 'public/**'
+  - 'config/**'
+  - 'data/**'
 
 comment:
-  layout: "reach, diff, flags"
+  layout: 'reach, diff, flags'
   require_changes: true
