@@ -107,18 +107,32 @@ func TestMissingDataIsReported(t *testing.T) {
 	}
 }
 
-func TestSendCurrentStatus(t *testing.T) {
-	var sent []string
-	tg := recorder(t, &sent)
-	if err := sendCurrentStatus(context.Background(), tg, owner, writeSummary(t)); err != nil {
+func TestSelfTestIsSilentForOwner(t *testing.T) {
+	var paths []string
+	tg := testBot(t, func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		_, _ = w.Write([]byte(`{"ok":true,"result":{}}`))
+	})
+
+	if err := selfTest(context.Background(), tg, owner, writeSummary(t)); err != nil {
 		t.Fatalf("проверка канала не прошла: %v", err)
 	}
-	if len(sent) != 1 || !strings.Contains(sent[0], "Snakes") {
-		t.Fatalf("сводка не отправлена: %v", sent)
+
+	// Главное в этом тесте: выкатка бота НЕ пишет владельцу. Раньше selftest
+	// слал полную сводку, и за вечер с десятком выкаток человек получал десяток
+	// карточек «всё работает», которых не просил.
+	for _, p := range paths {
+		if strings.Contains(p, "sendMessage") {
+			t.Fatalf("selftest отправил сообщение владельцу: %v", paths)
+		}
+	}
+	if len(paths) != 1 || !strings.Contains(paths[0], "sendChatAction") {
+		t.Fatalf("ожидали одну проверку канала через sendChatAction, получили %v", paths)
 	}
 
-	// Нет данных — проверка обязана провалиться, а не «пройти» молча.
-	if err := sendCurrentStatus(context.Background(), tg, owner, filepath.Join(t.TempDir(), "нет.json")); err == nil {
+	// Молчаливость не должна превратиться в «проверка ничего не проверяет»:
+	// нет данных агента — провал, иначе выкатка сочтёт сломанного бота живым.
+	if err := selfTest(context.Background(), tg, owner, filepath.Join(t.TempDir(), "нет.json")); err == nil {
 		t.Fatal("без данных агента проверка не может считаться успешной")
 	}
 }

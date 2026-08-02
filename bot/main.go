@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os/signal"
 	"sync"
@@ -46,7 +47,7 @@ func main() {
 	// Единственный флаг — действие, а не настройка: всё остальное живёт в
 	// окружении, одним местом (см. config.go).
 	selftest := flag.Bool("selftest", false,
-		"отправить владельцу текущее состояние и выйти — проверка канала после выкатки")
+		"проверить данные, сборку сводки и канал в Telegram и выйти — без сообщения владельцу")
 	flag.Parse()
 
 	cfg, err := loadConfig()
@@ -78,11 +79,13 @@ func main() {
 
 	// Проверка канала после выкатки. Молчащий бот неотличим от работающего,
 	// пока что-нибудь не упадёт, — а выяснять это в момент аварии поздно.
+	// Проверка молчалива для владельца, но не для выкатки: её код возврата
+	// доезжает до release.sh через systemd-run --wait и роняет релиз.
 	if *selftest {
-		if err := sendCurrentStatus(ctx, tg, cfg.Owner, summaryPath); err != nil {
+		if err := selfTest(ctx, tg, cfg.Owner, summaryPath); err != nil {
 			log.Fatalf("проверка не прошла: %v", err)
 		}
-		log.Print("проверка прошла: сводка отправлена владельцу")
+		log.Print("проверка прошла: данные читаются, сводка строится, канал открыт")
 		return
 	}
 
@@ -205,13 +208,27 @@ func main() {
 	log.Print("бот остановлен")
 }
 
-// sendCurrentStatus отправляет владельцу то же, что он получил бы по /status.
-func sendCurrentStatus(ctx context.Context, tg *Telegram, owner int64, summaryPath string) error {
+// selfTest проверяет, что бот способен сделать свою работу, НЕ беспокоя
+// владельца сообщением.
+//
+// Проверяются те же три звена, что и раньше:
+//   - данные агента читаются (loadSummary);
+//   - сводка строится (formatStatus вызывается, результат отбрасывается —
+//     нужен сам факт, что форматирование не паникует на текущих данных);
+//   - канал в Telegram открыт (Ping — sendChatAction, без записи в чат).
+//
+// Отправки карточки здесь больше нет: выкатка бота случается часто, а
+// сообщение «всё работает» в ответ на неё владелец не просил. Подробности —
+// в комментарии к Telegram.Ping.
+func selfTest(ctx context.Context, tg *Telegram, owner int64, summaryPath string) error {
 	s, err := loadSummary(summaryPath)
 	if err != nil {
 		return err
 	}
-	return tg.SendWith(ctx, owner, formatStatus(s, time.Now().UTC()), statusKeyboard(s))
+	if formatStatus(s, time.Now().UTC()) == "" {
+		return fmt.Errorf("сводка построилась пустой: данные %s", summaryPath)
+	}
+	return tg.Ping(ctx, owner)
 }
 
 // handleUpdate отвечает на одно сообщение.
