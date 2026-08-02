@@ -124,6 +124,25 @@ func (t *Telegram) Send(ctx context.Context, chatID int64, text string) error {
 	return t.SendWith(ctx, chatID, text, nil)
 }
 
+// Ping проверяет канал, НИЧЕГО не отправляя в переписку.
+//
+// sendChatAction выбран именно поэтому: он проходит ровно тот же путь, что и
+// настоящее сообщение — токен, сеть, доступ бота в этот чат, — но не оставляет
+// после себя записи. Если токен протух, чат недоступен или бота заблокировали,
+// Telegram ответит ошибкой, и проверка это увидит.
+//
+// Раньше на этом месте была отправка полной сводки. Она честно проверяла
+// канал, но платила за это сообщением владельцу при КАЖДОЙ выкатке бота: за
+// один вечер выкаток набирается с десяток, и человек получает столько же
+// карточек «всё работает», которых не просил. Уведомление, которое приходит
+// без события, обесценивает те, что приходят с событием.
+func (t *Telegram) Ping(ctx context.Context, chatID int64) error {
+	return t.call(ctx, "sendChatAction", map[string]any{
+		"chat_id": chatID,
+		"action":  "typing",
+	}, nil)
+}
+
 // SendWith — сообщение с кнопками под ним.
 func (t *Telegram) SendWith(ctx context.Context, chatID int64, text string, kb *Keyboard) error {
 	payload := map[string]any{
