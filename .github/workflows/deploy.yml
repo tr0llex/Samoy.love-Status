@@ -23,6 +23,11 @@ on:
         type: boolean
         default: false
 
+# Минимальные права для GITHUB_TOKEN. Выкатка ходит на сервер по SSH
+# секретами, токен ей нужен только для checkout.
+permissions:
+  contents: read
+
 jobs:
   # Что вообще менялось.
   #
@@ -113,3 +118,61 @@ jobs:
       gates: go vet ./... && go test ./... -race -coverprofile=coverage.out -covermode=atomic
       dry-run: ${{ inputs.dry-run == true }}
     secrets: inherit
+
+  # Смоук по живому проду.
+  #
+  # Проверка внутри выкатки смотрит на код ответа, а статус-страница отдаёт 200
+  # и когда данных нет, и когда скрипт упал на неожиданном поле, — на экране
+  # при этом пусто. Набор существовал давно и не запускался нигде: сегодня,
+  # запущенный впервые, он сразу нашёл, что CSP блокирует SDK Telegram и
+  # мини-приложение живёт без темы и кнопки «назад».
+  #
+  # Отдельной работой, а не гейтом внутри выкатки: гейт задержал бы
+  # переключение, а проверять надо именно то, что уже переключилось. Красный
+  # смоук — сигнал откатывать руками, `dk rollback status-site`.
+  smoke:
+    needs: [site, agent]
+    if: >-
+      !cancelled() && inputs.dry-run != true
+      && (needs.site.result == 'success' || needs.agent.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+
+      - name: Версия Playwright
+        id: pw
+        run: echo "v=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        id: pw-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ steps.pw.outputs.v }}
+
+      - name: Поставить Chromium
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Системные библиотеки для Chromium
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      # Агент обходит сервисы раз в минуту: сразу после выкатки данные могут
+      # быть от предыдущего запуска, и проверка свежести придирется на пустом
+      # месте. Ждём один обход.
+      - name: Дать агенту сделать обход
+        run: sleep 75
+
+      - run: npm run e2e:prod
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: smoke-report
+          path: test-results/
+          retention-days: 7
