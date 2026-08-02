@@ -275,3 +275,29 @@ func TestСсылкиВедутНаСервисы(t *testing.T) {
 		t.Errorf("недопустимая схема попала в ссылку: %s", bad)
 	}
 }
+
+func TestАптаймНеУмножаетсяДважды(t *testing.T) {
+	// Агент отдаёт проценты (agent/main.go, pct). Лишнее умножение на сто
+	// давало «9991.00% за 90 дней» — число, которое читается как поломка
+	// бота, а не как доступность.
+	v := 99.91
+	full := 100.0
+	cases := []struct {
+		name   string
+		uptime map[string]*float64
+		want   string
+	}{
+		{"90 дней", map[string]*float64{"d90": &v}, "99.91% за 90 дней"},
+		{"ровно сто", map[string]*float64{"d90": &full}, "100% за 90 дней"},
+		{"только неделя", map[string]*float64{"d7": &v}, "99.91% за неделю"},
+		{"нет данных", map[string]*float64{"d90": nil}, ""},
+		{"пусто", nil, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := uptimeText(Check{Uptime: c.uptime}); got != c.want {
+				t.Errorf("получили %q, ожидали %q", got, c.want)
+			}
+		})
+	}
+}

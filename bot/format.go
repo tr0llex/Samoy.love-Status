@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -364,15 +365,29 @@ func checkRank(c Check) int {
 }
 
 // uptimeText — доступность живой проверки короткой строкой.
+//
+// Агент отдаёт аптайм УЖЕ в процентах (agent/main.go, pct). Умножать здесь
+// ещё на сто — как было в первой версии — значит показывать «9991.00%»:
+// число выглядит настолько неправдоподобно, что читается как поломка бота,
+// а не как доступность.
 func uptimeText(c Check) string {
 	v, ok := c.Uptime["d90"]
 	if !ok || v == nil {
 		if v, ok = c.Uptime["d7"]; !ok || v == nil {
 			return ""
 		}
-		return fmt.Sprintf("%.2f%% за неделю", *v*100)
+		return fmt.Sprintf("%s за неделю", fmtPct(*v))
 	}
-	return fmt.Sprintf("%.2f%% за 90 дней", *v*100)
+	return fmt.Sprintf("%s за 90 дней", fmtPct(*v))
+}
+
+// fmtPct — процент без хвостовых нулей: «100%» вместо «100.00%», но
+// «99.87%» целиком. То же правило, что на странице (src/lib/status.ts).
+func fmtPct(v float64) string {
+	s := strconv.FormatFloat(v, 'f', 2, 64)
+	s = strings.TrimRight(s, "0")
+	s = strings.TrimRight(s, ".")
+	return s + "%"
 }
 
 // freshness — строка о свежести данных.
