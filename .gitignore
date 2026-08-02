@@ -2,3 +2,16 @@ node_modules/
 dist/
 .astro/
 .DS_Store
+
+# Каталог сборки агента: бинарник кладёт туда пайплайн при выкатке,
+# в репозитории ему делать нечего.
+stage/
+agent/coverage.out
+bot/coverage.out
+
+# `go build ./...` кладёт бинарник рядом с исходниками — в репозиторий он
+# попадать не должен.
+agent/agent.exe
+agent/agent
+bot/bot.exe
+bot/bot
