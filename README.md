@@ -1,5 +1,9 @@
 # samoy-status
 
+[![CI](https://github.com/tr0llex/Samoy.love-Status/actions/workflows/ci.yml/badge.svg)](https://github.com/tr0llex/Samoy.love-Status/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/tr0llex/Samoy.love-Status/branch/main/graph/badge.svg)](https://codecov.io/gh/tr0llex/Samoy.love-Status)
+
+
 Статус-страница сервисов samoy.love — **https://status.samoy.love**
 
 ## Как устроено
