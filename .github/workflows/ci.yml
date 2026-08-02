@@ -6,6 +6,40 @@ on:
     branches-ignore: [main]
 
 jobs:
+  # Соглашение из CLAUDE.md, проверяемое машиной.
+  #
+  # Записанного правила оказалось мало: трейлер `Co-Authored-By: Claude` уехал
+  # в тридцать семь коммитов подряд, и убирать его пришлось переписыванием
+  # опубликованной истории. Локальный хук (.githooks/commit-msg) ловит это
+  # раньше, но он включается вручную и в клоне отсутствует — здесь страховка.
+  commits:
+    name: Коммиты без упоминаний ИИ
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Проверить сообщения
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            RANGE="origin/${{ github.base_ref }}..HEAD"
+          else
+            RANGE="origin/main..HEAD"
+          fi
+          echo "проверяю $RANGE"
+
+          BAD=$(git log "$RANGE" --format='%H %B' \
+            | grep -iE '^Co-[Aa]uthored-[Bb]y:.*(claude|anthropic|copilot|gpt)|(generated|created|written) with .*(claude|copilot|chatgpt)|🤖' \
+            || true)
+
+          if [ -n "$BAD" ]; then
+            echo "::error::в сообщениях коммитов есть упоминания ИИ — авторство принадлежит владельцу репозитория (CLAUDE.md)"
+            echo "$BAD"
+            exit 1
+          fi
+          echo "чисто"
+
   agent:
     name: Агент (Go)
     runs-on: ubuntu-latest
