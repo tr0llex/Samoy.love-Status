@@ -33,6 +33,9 @@ type Event struct {
 	Duration time.Duration
 	Version  string
 	Previous string
+	// CommitURL — адрес коммита этой версии. Пусто — версия в сообщении
+	// остаётся обычным текстом; см. formatEvent.
+	CommitURL string
 	// Changelog — что изменилось в этой версии, по строке на пункт. Заполнен
 	// только у релизов и только если выкатка положила список в version.json:
 	// сам бот его составить не может, git-истории выкаченных проектов на
@@ -302,6 +305,10 @@ func (st *State) Apply(s *Summary, now time.Time, remind, stale time.Duration) [
 					URL:     firstNonEmptyStr(b.URL, p.URL),
 					Project: p.ID,
 					Version: b.Version, Previous: prev, At: at,
+					// Куда ведёт версия: связь «коммит — выкатка», о которой
+					// просил владелец. Может быть пустым — тогда версия
+					// покажется текстом.
+					CommitURL: b.CommitURL,
 					// Что изменилось — из тех же данных, что и версия.
 					// Списка может не быть: тогда сообщение остаётся прежним.
 					Changelog: b.Changelog,
