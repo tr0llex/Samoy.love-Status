@@ -464,6 +464,20 @@ if (!state.services) state.services = {};
 const previousRunAt = typeof state.updated === 'string' ? state.updated : null;
 const sinceLastRun = previousRunAt ? now - Date.parse(previousRunAt) : NaN;
 
+// Промежуток между ЗАПУСКАМИ, а не между обходами. Считать его здесь нечем:
+// обходов в запуске пять, каждый переписывает state.updated, и начиная со
+// второго sinceLastRun равен минуте сна между ними — сколько бы часов сторожа
+// перед этим не было. Границу запуска знает только probe.yml, он её и передаёт
+// (шаг «Возраст прошлого обхода»). Пусто при локальном прогоне и на первом
+// запуске — тогда остаётся промежуток между обходами.
+const runPreviousAt = process.env.PROBE_PREVIOUS_AT || null;
+const runGapMs = process.env.PROBE_GAP_MS ? Number(process.env.PROBE_GAP_MS) : NaN;
+const summaryGapMs = Number.isFinite(runGapMs)
+  ? runGapMs
+  : Number.isFinite(sinceLastRun)
+    ? sinceLastRun
+    : null;
+
 // Проверки живут внутри проектов, но обходим их плоским списком: у каждой свой
 // id, и история привязана именно к нему, а не к месту в дереве.
 const flat = config.projects.flatMap((p) =>
@@ -713,10 +727,15 @@ await writeJson(join(DATA, 'summary.json'), {
   // Возраст самого сторожа рядом с тем, что он намерил. Сводка, пролежавшая
   // три часа, на вид ничем не отличается от сделанной минуту назад, а разница
   // между ними — это разница между «проверено» и «когда-то проверялось».
-  // previousAt пуст только у первого обхода, gapMs — null при нём же.
+  //
+  // Промежуток здесь — между ЗАПУСКАМИ (PROBE_GAP_MS из probe.yml). Считанный
+  // на месте, он отвечал бы «минуту» после любого перерыва: обходов в запуске
+  // пять, и каждый переписывает state.updated. Поле, заведённое ради вопроса
+  // «сколько сторожа не было», на этот вопрос тогда не отвечало вовсе.
+  // previousAt пуст только у первого запуска, gapMs — null при нём же.
   probe: {
-    previousAt: previousRunAt,
-    gapMs: Number.isFinite(sinceLastRun) ? sinceLastRun : null,
+    previousAt: runPreviousAt ?? previousRunAt,
+    gapMs: summaryGapMs,
   },
   overall,
   projects,
