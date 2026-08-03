@@ -144,6 +144,71 @@
       ]
     },
     {
+      "id": "die",
+      "title": "Double or Die",
+      "subtitle": "Кооп-рогалик, где сложность выбираешь сам — пари на себя",
+      "url": "https://die.samoy.love",
+      "accent": "oklch(0.68 0.19 25)",
+      "checks": [
+        {
+          "id": "die",
+          "name": "Игра",
+          "impact": "Игра не открывается",
+          "url": "https://die.samoy.love/",
+          "expect": 200,
+          "critical": true,
+          "slowMs": 3000,
+          "expectType": "text/html",
+          "bodyIncludes": "</html>",
+          "cert": "die.samoy.love"
+        },
+        {
+          "id": "die-version",
+          "name": "Манифест версии",
+          "note": "По нему игрок узнаёт о новой сборке",
+          "impact": "Игроки останутся на старой версии и не узнают об обновлении",
+          "//": "Проверка не лишняя рядом с builds: там манифест читают ради номера версии, здесь — ради того, что он вообще отдаётся и отдаётся как JSON. Кэширующий заголовок или SPA-фолбэк ломают обновление молча, оставляя код 200.",
+          "url": "https://die.samoy.love/version.json",
+          "expect": 200,
+          "critical": true,
+          "slowMs": 2000,
+          "expectType": "json",
+          "bodyIncludes": "\"version\""
+        },
+        {
+          "id": "die-sw",
+          "name": "Service worker",
+          "note": "Отвечает за офлайн и за подхват обновления",
+          "impact": "Офлайн-режим не обновится у новых игроков. Уже установленные копии продолжают работать",
+          "url": "https://die.samoy.love/sw.js",
+          "expect": 200,
+          "critical": false,
+          "slowMs": 2000,
+          "expectType": "javascript"
+        },
+        {
+          "id": "die-dev",
+          "name": "Nightly",
+          "note": "Сборка из main, на которой ловят то, что не поймал CI",
+          "impact": "Проверять новую сборку до игроков негде. Самих игроков не затрагивает",
+          "url": "https://dev.die.samoy.love/",
+          "expect": 200,
+          "critical": false,
+          "slowMs": 3000,
+          "expectType": "text/html",
+          "bodyIncludes": "</html>"
+        }
+      ],
+      "//builds": "Только прод. Nightly едет с того же коммита, и вторая запись означала бы два сообщения о релизе об одном и том же — а голос о релизах здесь один. Доступность nightly при этом проверяется, см. check die-dev.",
+      "builds": [
+        {
+          "title": "Игра",
+          "type": "url",
+          "path": "https://die.samoy.love/version.json"
+        }
+      ]
+    },
+    {
       "id": "metro",
       "title": "Метро",
       "subtitle": "Офлайн-схема московского метро, работает без сети",
