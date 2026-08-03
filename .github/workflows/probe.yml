@@ -111,6 +111,15 @@ jobs:
             ? `прошлый обход ${human(ms)} назад`
             : 'прошлых обходов нет';
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `since=${since}\n`);
+          // Те же два числа, но машинно: их забирает probe.mjs и кладёт в
+          // сводку. Сам он этот промежуток посчитать не может — обходов в
+          // запуске пять, и каждый переписывает data/state.json, так что со
+          // второго у него выходит минута сна, а не длина перерыва. Граница
+          // запуска известна только здесь.
+          fs.appendFileSync(
+            process.env.GITHUB_OUTPUT,
+            `previous=${prev ?? ''}\ngap_ms=${Number.isFinite(ms) ? ms : ''}\n`,
+          );
           fs.appendFileSync(
             process.env.GITHUB_STEP_SUMMARY,
             `Внешняя проверка: ${since}. Расписание просит каждые 5 минут, ` +
@@ -142,6 +151,10 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           NOTIFY_TEST: ${{ inputs.notify_test }}
+          # Граница между запусками — единственное, чего обход не знает о себе
+          # сам: все пять обходов запуска видят только соседа по циклу.
+          PROBE_PREVIOUS_AT: ${{ steps.age.outputs.previous }}
+          PROBE_GAP_MS: ${{ steps.age.outputs.gap_ms }}
         run: |
           for i in 1 2 3 4 5; do
             echo "::group::обход $i из 5"
