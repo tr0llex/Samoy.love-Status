@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 )
 
@@ -17,11 +18,28 @@ func viewOf(cmd string) string {
 		return ViewVersions
 	case CmdIncidents:
 		return ViewIncidents
+	case CmdChangelog:
+		return ViewChangelog
 	case CmdHelp:
 		return ViewHelp
 	default:
 		return ViewStatus
 	}
+}
+
+// viewFor — экран для команды с аргументом.
+//
+// Аргумент уезжает прямо в ключ экрана, потому что тот же ключ становится
+// callback_data кнопки «Обновить». Там 64 БАЙТА на всё, и слишком длинное
+// слово владельца не должно превращать ответ в ошибку Telegram — сообщение с
+// негодной кнопкой не отправляется целиком. Поэтому имя обрезается заранее:
+// названия целей короткие, и обрезанное имя всё равно приведёт к ответу
+// «не знаю такой цели» со списком тех, что есть.
+func viewFor(cmd, arg string) string {
+	if cmd != CmdChangelog || arg == "" {
+		return viewOf(cmd)
+	}
+	return ViewChangelogOf + cutBytes(strings.ToLower(arg), callbackDataMax-len(ViewChangelogOf))
 }
 
 // renderView собирает текст экрана и клавиатуру под ним. Данные читаются на
@@ -42,6 +60,9 @@ func renderView(view, summaryPath string, now time.Time) (string, *Keyboard) {
 		log.Printf("данные агента не прочитаны: %v", err)
 		return "🔴 Не могу прочитать данные агента — похоже, он не работает", navKeyboard(view)
 	}
+	if q, ok := changelogOfView(view); ok {
+		return renderChangelog(s, summaryPath, q, now)
+	}
 	if id, ok := projectOfView(view); ok {
 		for _, p := range s.Projects {
 			if p.ID == id {
@@ -54,9 +75,11 @@ func renderView(view, summaryPath string, now time.Time) (string, *Keyboard) {
 	}
 	switch view {
 	case ViewVersions:
-		return formatVersions(s, now), navKeyboard(view)
+		return formatVersions(s, now), versionsKeyboard()
 	case ViewIncidents:
 		return formatIncidents(s, now), navKeyboard(view)
+	case ViewChangelog:
+		return renderChangelog(s, summaryPath, "", now)
 	default:
 		return formatStatus(s, now), statusKeyboard(s)
 	}
@@ -67,8 +90,13 @@ func renderView(view, summaryPath string, now time.Time) (string, *Keyboard) {
 // Отвечать Telegram надо всегда и как можно раньше: пока ответа нет, на
 // кнопке у владельца крутятся часики. Поэтому сначала гасим их, а потом уже
 // перерисовываем сообщение.
-func handleCallback(ctx context.Context, tg *Telegram, q *CallbackQuery, owner int64, summaryPath string) {
-	if q.From.ID != owner {
+//
+// Владелец здесь проверяется по ownerUser, а не по owner: нажатие приносит id
+// человека, а chat id — это адрес, куда отвечать. Если владелец не задан
+// (в TELEGRAM_CHAT_ID группа, TELEGRAM_OWNER_ID пуст), подтвердить право
+// нажимающего нечем, и кнопка не срабатывает — ровно как и раньше.
+func handleCallback(ctx context.Context, tg *Telegram, q *CallbackQuery, owner, ownerUser int64, summaryPath string) {
+	if ownerUser <= 0 || q.From.ID != ownerUser {
 		// Чужому не отвечаем содержимым, но часики гасим: иначе кнопка у него
 		// будет «висеть», и это само по себе подсказка, что бот живой.
 		_ = tg.AnswerCallback(ctx, q.ID, "")
@@ -87,9 +115,11 @@ func handleCallback(ctx context.Context, tg *Telegram, q *CallbackQuery, owner i
 	}
 
 	view := q.Data
-	if _, isProject := projectOfView(view); !isProject {
+	_, isProject := projectOfView(view)
+	_, isService := changelogOfView(view)
+	if !isProject && !isService {
 		switch view {
-		case ViewStatus, ViewVersions, ViewIncidents, ViewHelp:
+		case ViewStatus, ViewVersions, ViewIncidents, ViewChangelog, ViewHelp:
 		default:
 			// Кнопка из сообщения, отправленного прошлой версией бота.
 			view = ViewStatus
@@ -98,7 +128,7 @@ func handleCallback(ctx context.Context, tg *Telegram, q *CallbackQuery, owner i
 
 	log.Printf("кнопка %s", view)
 	text, kb := renderView(view, summaryPath, time.Now().UTC())
-	if err := tg.Edit(ctx, q.Message.Chat.ID, q.Message.MessageID, text, kb); err != nil {
+	if err := tg.EditLong(ctx, q.Message.Chat.ID, q.Message.MessageID, text, kb); err != nil {
 		log.Printf("экран %s не перерисован: %v", view, err)
 	}
 }

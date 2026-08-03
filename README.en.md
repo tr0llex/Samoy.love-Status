@@ -103,6 +103,31 @@ messenger must not drift apart.
 
 <img src="docs/img/telegram.svg" alt="Bot and mini app" width="380">
 
+**What exactly shipped in a release is not something the bot works out itself.**
+Neither it nor the agent can: there is not a single one of the deployed
+repositories on the server, so there is nobody to ask `git log`. The list
+therefore arrives as data — the deploy writes it into `version.json` next to the
+version, the agent carries it into `summary.json` and into the deployment
+journal `releases.json`, and the bot shows it twice: as an "Изменения" block in
+the release notification, and later on the `/changelog` screen, once that
+message has scrolled away. `/changelog` without an argument shows the latest
+deploy of every target in the estate, `/changelog metro` the history of one
+target, up to five deploys in a row; the same is available from the "Что
+менялось" button under the versions screen.
+
+The list is **not truncated at any link of the chain**: not by the generator on
+its way into `version.json`, not by the agent, not by the bot. The
+"…и ещё 1 коммит" tail cost a line and did not say which commit it was; a long
+answer meets Telegram's limit by being split across several consecutive
+messages, not by being shortened. A PR number from the subject arrives as a link
+to the PR itself — the only markup allowed through the agent, and even that is
+rebuilt from validated pieces.
+
+The price is that commit subjects become public: both a service's
+`version.json` and the `data/*.json` files are served over HTTP to everyone —
+which, for public repositories, is exactly what the git history shows anyway.
+The whole path is described in [`docs/RELEASES.md`](docs/RELEASES.md) (Russian).
+
 ## Stack
 
 `Go 1.25` · `Astro 7` · `TypeScript` · `Node` · `GitHub Actions` · `systemd` ·
@@ -128,26 +153,28 @@ npm run e2e                                              # end-to-end tests
 
 ## Structure
 
-| Path                    | Purpose                                                         |
-| ----------------------- | --------------------------------------------------------------- |
-| `agent/`                | agent: probes, systemd, versions, history, metrics              |
-| `bot/`                  | Telegram bot: commands, buttons, notifications, dead-man switch |
-| `scripts/probe.mjs`     | external watchdog, run from GitHub Actions                      |
-| `config/status.json`    | the single check config, read by agent and watchdog             |
-| `src/pages/index.astro` | the status page                                                 |
-| `src/pages/tg.astro`    | compact build for the Telegram mini app                         |
-| `src/lib/status.ts`     | verdict logic shared by both builds of the page                 |
-| `e2e/`                  | Playwright scenarios and the `fixtures/` data sets              |
-| `deploy/systemd/`       | units and the agent timer                                       |
-| `docs/CONFIG.md`        | how a check is described and what is configured now (Russian)   |
-| `docs/DEPLOY.md`        | deployment, provisioning, running locally (Russian)             |
-| `.deploy-kit/*.env`     | three deployment targets: page, agent, bot                      |
+| Path                    | Purpose                                                                        |
+| ----------------------- | ------------------------------------------------------------------------------ |
+| `agent/`                | agent: probes, systemd, versions, history, metrics                             |
+| `bot/`                  | Telegram bot: commands, buttons, notifications, dead-man switch                |
+| `scripts/probe.mjs`     | external watchdog, run from GitHub Actions                                     |
+| `config/status.json`    | the single check config, read by agent and watchdog                            |
+| `src/pages/index.astro` | the status page                                                                |
+| `src/pages/tg.astro`    | compact build for the Telegram mini app                                        |
+| `src/lib/status.ts`     | verdict logic shared by both builds of the page                                |
+| `e2e/`                  | Playwright scenarios and the `fixtures/` data sets                             |
+| `deploy/systemd/`       | units and the agent timer                                                      |
+| `docs/CONFIG.md`        | how a check is described and what is configured now (Russian)                  |
+| `docs/DEPLOY.md`        | deployment, provisioning, running locally (Russian)                            |
+| `docs/RELEASES.md`      | the release changelog: who builds it, where it lives, how to read it (Russian) |
+| `.deploy-kit/*.env`     | three deployment targets: page, agent, bot                                     |
 
 ## Tests
 
-96 Go tests: 47 for the agent (verdicts, outage scale, failure confirmation,
-systemd parsing, uptime windows, metrics) and 49 for the bot (formatting,
-keyboards, dead-man switch, Telegram delivery). They run with `-race` — both
+158 Go tests: 69 for the agent (verdicts, outage scale, failure confirmation,
+systemd parsing, uptime windows, the deployment journal, metrics) and 89 for the
+bot (formatting, keyboards, the changelog screen, dead-man switch, Telegram
+delivery). They run with `-race` — both
 services are concurrent, and a race shows up in production at the least
 convenient moment. Coverage goes to Codecov under two flags.
 

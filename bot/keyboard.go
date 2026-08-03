@@ -44,7 +44,33 @@ const (
 	// проекты со всеми проверками, службами и полосками, и единственную
 	// красную строку приходилось искать глазами среди двух десятков зелёных.
 	ViewProject = "v:p:"
+	// ViewChangelog — что менялось по всему хозяйству, последняя выкатка каждой
+	// цели. ViewChangelogOf — то же по одной цели, ключ вида "v:cl:metro".
+	//
+	// Раньше список изменений можно было увидеть ровно один раз — в уведомлении
+	// о релизе в момент выкатки. Пропустил сообщение (или спишь, или его
+	// придержала тишина) — и узнать, что уехало, уже негде: бот живёт на
+	// сервере, где нет ни одного из выкаченных репозиториев. Журнал выкаток
+	// агента (releases.json) хранит это и после отправки.
+	ViewChangelog   = "v:cl"
+	ViewChangelogOf = "v:cl:"
 )
+
+// callbackDataMax — предел Telegram на callback_data кнопки.
+//
+// Считается в БАЙТАХ, и превышение — не молчаливая обрезка, а отказ отправить
+// сообщение целиком: ответ на /changelog с длинным аргументом просто не пришёл
+// бы. Поэтому аргумент, уезжающий в ключ экрана, обрезается заранее.
+const callbackDataMax = 64
+
+// changelogOfView возвращает запрошенную цель, если это экран одной цели.
+func changelogOfView(view string) (string, bool) {
+	if !strings.HasPrefix(view, ViewChangelogOf) {
+		return "", false
+	}
+	q := strings.TrimPrefix(view, ViewChangelogOf)
+	return q, q != ""
+}
 
 // projectOfView возвращает id проекта, если это экран проекта.
 func projectOfView(view string) (string, bool) {
@@ -149,6 +175,56 @@ func projectRows(s *Summary, current string) [][]Button {
 		row = append(row, Button{
 			Text:         mark(ViewProject+p.ID, current, label),
 			CallbackData: ViewProject + p.ID,
+		})
+		if len(row) == projectsPerRow {
+			rows = append(rows, row)
+			row = nil
+		}
+	}
+	if len(row) > 0 {
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// versionsKeyboard — под экраном версий.
+//
+// Отдельная кнопка нужна ровно из-за порядка вопросов: экран версий отвечает
+// «какая версия сейчас», и следующий вопрос всегда «а что в ней». Без кнопки
+// ответ на него надо набирать командой, а про команду ещё надо знать.
+func versionsKeyboard() *Keyboard {
+	rows := [][]Button{{{Text: "Что менялось", CallbackData: ViewChangelog}}}
+	return &Keyboard{InlineKeyboard: append(rows, navRows(ViewVersions)...)}
+}
+
+// changelogKeyboard — под экраном изменений: ряд проектов, чтобы провалиться
+// в конкретный, не набирая его имя руками.
+//
+// Значка состояния на этих кнопках нет намеренно, в отличие от экрана статуса:
+// здесь речь о выкатках, а не о здоровье, и красный кружок рядом с названием
+// читался бы как «этот релиз сломан».
+func changelogKeyboard(s *Summary, current string) *Keyboard {
+	rows := changelogRows(s, current)
+	return &Keyboard{InlineKeyboard: append(rows, navRows(current)...)}
+}
+
+func changelogRows(s *Summary, current string) [][]Button {
+	if s == nil {
+		return nil
+	}
+	var rows [][]Button
+	var row []Button
+	seen := map[string]bool{}
+	for _, p := range s.Projects {
+		// У проекта целей бывает несколько (сайт, API, админка), а кнопка
+		// ведёт в проект целиком: экран цели покажет их все.
+		if p.ID == "" || seen[p.ID] || len(ViewChangelogOf+p.ID) > callbackDataMax {
+			continue
+		}
+		seen[p.ID] = true
+		row = append(row, Button{
+			Text:         mark(ViewChangelogOf+p.ID, current, p.Title),
+			CallbackData: ViewChangelogOf + p.ID,
 		})
 		if len(row) == projectsPerRow {
 			rows = append(rows, row)

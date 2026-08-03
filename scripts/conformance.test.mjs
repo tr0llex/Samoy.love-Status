@@ -110,6 +110,26 @@ function configFor(port) {
   };
 }
 
+/** Проект, в котором нет ни одной критичной проверки, и одна из них лежит. */
+function auxOnlyConfigFor(port) {
+  const check = (id, path) => ({
+    id,
+    name: id,
+    critical: false,
+    url: `http://127.0.0.1:${port}${path}`,
+  });
+  return {
+    projects: [
+      {
+        id: 'aux-only',
+        title: 'Только второстепенное',
+        url: `http://127.0.0.1:${port}/ok`,
+        checks: [check('aux-ok', '/ok'), check('aux-down', '/404')],
+      },
+    ],
+  };
+}
+
 function run(cmd, args, opts) {
   return new Promise((resolve, reject) => {
     // Без shell: путь к node на Windows лежит в «Program Files», и оболочка
@@ -137,6 +157,23 @@ async function verdicts(dataDir) {
     for (const c of p.checks) out[c.id] = c.status;
   }
   return out;
+}
+
+/** Общий вердикт из summary.json. */
+async function overall(dataDir) {
+  return JSON.parse(await readFile(join(dataDir, 'summary.json'), 'utf8')).overall;
+}
+
+/**
+ * Проверки, по которым открыт незакрытый инцидент. Агент пишет в end пустую
+ * строку, сторож — null; для «не закрыт» важно только то, что оно пустое.
+ */
+async function openIncidents(dataDir) {
+  const list = JSON.parse(await readFile(join(dataDir, 'incidents.json'), 'utf8'));
+  return list
+    .filter((i) => !i.end)
+    .map((i) => i.service)
+    .sort();
 }
 
 test('агент и сторож судят одинаково', async (t) => {
@@ -185,4 +222,57 @@ test('агент и сторож судят одинаково', async (t) => {
     assert.equal(fromProbe[c.id], c.want, `сторож: ${c.note}`);
   }
   assert.deepEqual(fromAgent, fromProbe, 'вердикты агента и сторожа разошлись');
+
+  // Оба каталога данных пусты, то есть каждая проверка наблюдается впервые.
+  // Именно в этот момент сторож когда-то молчал: инцидент он открывал только
+  // при СМЕНЕ состояния, а первого наблюдения менять было нечему. Падение,
+  // заставшее сторожа без истории, не попадало ни в историю, ни в Telegram.
+  const wantOpen = CASES.filter((c) => c.want === 'down')
+    .map((c) => c.id)
+    .sort();
+  assert.deepEqual(await openIncidents(agentData), wantOpen, 'агент: инциденты первого прогона');
+  assert.deepEqual(
+    await openIncidents(probeData),
+    wantOpen,
+    'сторож: первое наблюдение лежащей проверки обязано открыть инцидент',
+  );
+});
+
+// Конфигурация без единой критичной проверки. Вердикты самих проверок в ней
+// совпадали и раньше — расходился только общий статус: сторож отвечал
+// «operational» при лежащей второстепенной, агент — «degraded». Прошлый набор
+// случаев на overall не смотрел вовсе, поэтому расхождение ничем не ловилось.
+test('общий вердикт совпадает, когда критичных проверок нет', async (t) => {
+  const { server, port } = await startServer();
+  const dir = await mkdtemp(join(tmpdir(), 'conformance-aux-'));
+  t.after(async () => {
+    server.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const configPath = join(dir, 'status.json');
+  await writeFile(configPath, JSON.stringify(auxOnlyConfigFor(port)), 'utf8');
+
+  const agentData = join(dir, 'agent');
+  const probeData = join(dir, 'probe');
+
+  await run(
+    GO,
+    ['run', '.', '-config', configPath, '-data', agentData, '-metrics', join(dir, 'agent.prom')],
+    { cwd: join(ROOT, 'agent') },
+  );
+  await run(process.execPath, [join(ROOT, 'scripts/probe.mjs')], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      STATUS_CONFIG: configPath,
+      STATUS_DATA: probeData,
+      STATUS_SUMMARY_URL: `http://127.0.0.1:${port}/404`,
+      TELEGRAM_BOT_TOKEN: '',
+      TELEGRAM_CHAT_ID: '',
+    },
+  });
+
+  assert.equal(await overall(agentData), 'degraded', 'агент: лежит второстепенная');
+  assert.equal(await overall(probeData), 'degraded', 'сторож: лежит второстепенная');
 });

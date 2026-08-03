@@ -11,6 +11,7 @@ func TestParseCommand(t *testing.T) {
 	}{
 		{"обычная команда", "/status", "samoy_love_bot", "status"},
 		{"с аргументами", "/status всё ли живо", "samoy_love_bot", "status"},
+		{"аргумент не меняет команду", "/changelog metro", "samoy_love_bot", "changelog"},
 		{"регистр не важен", "/Status", "samoy_love_bot", "status"},
 		{"пробелы по краям", "  /help  ", "samoy_love_bot", "help"},
 		{"обращение к нам", "/status@samoy_love_bot", "samoy_love_bot", "status"},
@@ -40,6 +41,10 @@ func TestResolveCommand(t *testing.T) {
 		"versions":  CmdVersions,
 		"i":         CmdIncidents,
 		"incidents": CmdIncidents,
+		"c":         CmdChangelog,
+		"cl":        CmdChangelog,
+		"changelog": CmdChangelog,
+		"changes":   CmdChangelog,
 		"выкатка":   "",
 		"":          "",
 	}

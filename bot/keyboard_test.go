@@ -45,6 +45,31 @@ func TestКнопкаОбновитьВедётНаТотЖеЭкран(t *testi
 	}
 }
 
+func TestСЭкранаВерсийМожноПопастьВИзменения(t *testing.T) {
+	// Экран версий отвечает на вопрос «какая версия сейчас», и следующий
+	// вопрос всегда «а что в ней». Пока ответ на него был только командой,
+	// про команду надо было ещё узнать.
+	kb := versionsKeyboard()
+	var toChangelog, refresh string
+	for _, row := range kb.InlineKeyboard {
+		for _, b := range row {
+			if b.CallbackData == ViewChangelog {
+				toChangelog = b.Text
+			}
+			if strings.Contains(b.Text, "Обновить") {
+				refresh = b.CallbackData
+			}
+		}
+	}
+	if toChangelog == "" {
+		t.Error("с экрана версий нельзя попасть в изменения")
+	}
+	// Навигация при этом осталась прежней: «Обновить» ведёт на тот же экран.
+	if refresh != ViewVersions {
+		t.Errorf("«Обновить» на экране версий ведёт на %q", refresh)
+	}
+}
+
 func TestКнопкаМиниПриложенияТребуетHTTPS(t *testing.T) {
 	// Telegram открывает мини-приложение только по https. Если адрес другой,
 	// кнопка обязана остаться, но уже обычной ссылкой — иначе она молча

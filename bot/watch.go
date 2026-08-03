@@ -33,7 +33,13 @@ type Event struct {
 	Duration time.Duration
 	Version  string
 	Previous string
-	At       time.Time
+	// Changelog — что изменилось в этой версии, по строке на пункт. Заполнен
+	// только у релизов и только если выкатка положила список в version.json:
+	// сам бот его составить не может, git-истории выкаченных проектов на
+	// сервере нет. Пустой список означает прежнее сообщение о релизе, а не
+	// отсутствие уведомления.
+	Changelog []string
+	At        time.Time
 }
 
 // Item — что бот уже знает про одну наблюдаемую сущность.
@@ -63,6 +69,19 @@ type State struct {
 	MutedUntil string            `json:"mutedUntil,omitempty"`
 	Items      map[string]*Item  `json:"items"`
 	Versions   map[string]string `json:"versions"`
+
+	// dirty — Apply изменил состояние, а на диск оно ещё не легло.
+	//
+	// Событие и изменение состояния — не одно и то же: первое наблюдение
+	// версии и первое наблюдение живой цели запоминаются молча. Пока цикл
+	// наблюдения писал файл только при событии, эти записи не переживали
+	// перезапуск: бот снова видел все версии «впервые» и снова молчал, и
+	// выкатка, попавшая в такое окно, оставалась без уведомления — ровно
+	// то, ради чего состояние и заведено.
+	//
+	// Поле не сериализуется намеренно: только что прочитанное с диска
+	// состояние по определению чистое.
+	dirty bool
 }
 
 func newState() *State {
@@ -225,6 +244,7 @@ func (st *State) Apply(s *Summary, now time.Time, remind, stale time.Duration) [
 				})
 			}
 			st.Items[t.key] = item
+			st.dirty = true
 
 		case prev.Down != t.down:
 			since, ok := parseTime(prev.Since)
@@ -243,6 +263,7 @@ func (st *State) Apply(s *Summary, now time.Time, remind, stale time.Duration) [
 			prev.Down = t.down
 			prev.Since = t.since.UTC().Format(time.RFC3339)
 			prev.Notified = now.UTC().Format(time.RFC3339)
+			st.dirty = true
 
 		case t.down:
 			last, ok := parseTime(prev.Notified)
@@ -257,6 +278,7 @@ func (st *State) Apply(s *Summary, now time.Time, remind, stale time.Duration) [
 					Duration: now.Sub(since), At: now,
 				})
 				prev.Notified = now.UTC().Format(time.RFC3339)
+				st.dirty = true
 			}
 		}
 	}
@@ -280,9 +302,18 @@ func (st *State) Apply(s *Summary, now time.Time, remind, stale time.Duration) [
 					URL:     firstNonEmptyStr(b.URL, p.URL),
 					Project: p.ID,
 					Version: b.Version, Previous: prev, At: at,
+					// Что изменилось — из тех же данных, что и версия.
+					// Списка может не быть: тогда сообщение остаётся прежним.
+					Changelog: b.Changelog,
 				})
 			}
-			st.Versions[key] = b.Version
+			// Условие только ради dirty: присваивание само по себе
+			// идемпотентно, но помечать состояние изменённым на каждом
+			// обходе значило бы переписывать файл раз в 30 секунд впустую.
+			if !seen || prev != b.Version {
+				st.Versions[key] = b.Version
+				st.dirty = true
+			}
 		}
 	}
 
