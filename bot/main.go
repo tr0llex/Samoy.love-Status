@@ -111,9 +111,15 @@ func main() {
 			now := time.Now().UTC()
 			mu.Lock()
 			events := st.Apply(s, now, cfg.Remind, cfg.Stale)
-			if len(events) > 0 {
+			// Пишем по факту изменения, а не по факту события: часть
+			// изменений Apply делает молча (см. State.dirty). Флаг снимаем
+			// только после удачной записи — иначе одна неудача потеряла бы
+			// изменения навсегда.
+			if st.dirty {
 				if err := saveState(cfg.State, st); err != nil {
 					log.Printf("состояние не сохранено: %v", err)
+				} else {
+					st.dirty = false
 				}
 			}
 			muted, until := st.Muted(now)

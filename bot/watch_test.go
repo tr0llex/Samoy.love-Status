@@ -68,6 +68,35 @@ func TestFirstRunStaysSilentWhenHealthy(t *testing.T) {
 	}
 }
 
+// Молчаливое изменение состояния тоже обязано попасть на диск.
+//
+// Версия при первом наблюдении запоминается без события. Пока файл писался
+// только при событии, перезапуск бота терял выученные версии: следующий старт
+// снова видел их впервые и снова молчал, а выкатка, попавшая в это окно,
+// до владельца не доезжала.
+func TestSilentChangeMarksStateDirty(t *testing.T) {
+	st := newState()
+	s := summaryAt(base, "up", base.Add(-time.Hour), true, "v1")
+
+	events := st.Apply(s, base, 15*time.Minute, 5*time.Minute)
+	if len(events) != 0 {
+		t.Fatalf("живые сервисы не должны уведомлять: %v", kinds(events))
+	}
+	if !st.dirty {
+		t.Fatal("версии запомнены, но состояние не помечено к записи — перезапуск их потеряет")
+	}
+
+	// Обратная сторона: повтор того же самого ничего не меняет, и переписывать
+	// файл на каждом обходе незачем.
+	st.dirty = false
+	if events := st.Apply(s, base, 15*time.Minute, 5*time.Minute); len(events) != 0 {
+		t.Fatalf("повтор того же состояния не должен уведомлять: %v", kinds(events))
+	}
+	if st.dirty {
+		t.Error("состояние не менялось, а помечено к записи")
+	}
+}
+
 func TestFirstRunReportsExistingOutage(t *testing.T) {
 	st := newState()
 	events := st.Apply(summaryAt(base, "down", base.Add(-time.Hour), true, "v1"), base, 15*time.Minute, 5*time.Minute)
