@@ -28,7 +28,23 @@ name: Deploy
 #   docs/**   — весь остальной текст, вместе с картинками к нему: docs/img
 #               не .md, и раньше правка схемы давала пустой зелёный прогон.
 #   data/**   — выдача агента, она приезжает на сервер сама, а не выкаткой.
-# Ни один из этих путей не разбирается в `changes` — списки сверены построчно.
+#
+# Дальше — то, что не является путём сервиса по другой причине: оно относится
+# к проверкам, а не к проду. Ни один из этих путей не попадает НИ В ОДИН
+# BUILD_CMD (.deploy-kit/*.env) и не разбирается в `changes`, поэтому прогон
+# по ним и раньше заканчивался зелёным, не выкатив ничего:
+#   ci.yml, coverage.yml, probe.yml, dependabot.yml
+#             — сами проверки. Перечислены ПОИМЁННО, а не '.github/**':
+#               deploy.yml обязан катить всё (он в `changes`), а новый
+#               workflow пусть по умолчанию заводит прогон, а не молчит.
+#   e2e/**, playwright*.config.ts
+#             — сквозные проверки. Смоук по проду живёт в этом же файле, но
+#               запускается только вслед за успешной выкаткой site или agent,
+#               а правка одних тестов ни одной выкатки не делает — то есть
+#               и до этого не запускался.
+#   codecov.yml, .githooks/**, LICENSE
+#             — покрытие, локальный хук и лицензия.
+# Списки сверены построчно: ни один путь отсюда не встречается в `changes`.
 on:
   push:
     branches: [main]
@@ -36,6 +52,16 @@ on:
       - '*.md'
       - 'docs/**'
       - 'data/**'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/coverage.yml'
+      - '.github/workflows/probe.yml'
+      - '.github/dependabot.yml'
+      - 'e2e/**'
+      - 'playwright.config.ts'
+      - 'playwright.prod.config.ts'
+      - 'codecov.yml'
+      - '.githooks/**'
+      - 'LICENSE'
   workflow_dispatch:
     inputs:
       target:
@@ -134,7 +160,12 @@ jobs:
           # Новый файл в deploy/ ничего не сломает: чтобы он куда-то поехал,
           # его всё равно надо вписать в BUILD_CMD, а .deploy-kit/ — общий и
           # катит все цели.
-          echo "$FILES" | grep -qE '^(src/|public/|astro\.config|tsconfig)' && S=true || S=false
+          # scripts/ — тоже вход сборки страницы, а не оснастка рядом с ней:
+          # astro.config.mjs импортирует оттуда events-dev-endpoint.mjs и
+          # ставит его плагином vite, а check:no-inline-scripts из гейта — это
+          # scripts/check-no-inline-scripts.mjs. Правка любого из двух меняет
+          # результат `npm run build` или гейта, но страницу не выкатывала.
+          echo "$FILES" | grep -qE '^(src/|public/|scripts/|astro\.config|tsconfig)' && S=true || S=false
           echo "$FILES" | grep -qE '^(agent/|deploy/systemd/status-agent\.)' && A=true || A=false
           echo "$FILES" | grep -qE '^(bot/|deploy/systemd/samoylove-bot\.|deploy/verify-bot\.sh)' && B=true || B=false
           printf 'site=%s\nagent=%s\nbot=%s\n' "$S" "$A" "$B" >> "$GITHUB_OUTPUT"
