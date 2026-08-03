@@ -25,7 +25,7 @@ Telegram bot wakes the owner before a user does.
 ```mermaid
 flowchart LR
     subgraph host["single host"]
-        svc["services<br/>Launcher · Snakes<br/>Metro · Card · Status"]
+        svc["services<br/>Launcher · Snakes · Double or Die<br/>Metro · Card · Status · Monitoring"]
         agent["agent<br/>Go, every minute"]
         json[("summary.json")]
         page["page<br/>Astro"]
@@ -44,11 +44,23 @@ flowchart LR
 the central decision of this repository.** An agent on a downed host cannot
 report that the host is down: the services take the page, the bot and the probe
 loop with them. So the same endpoints are walked in parallel by the `probe`
-workflow (`scripts/probe.mjs`) — every five minutes, the finest cron interval
-GitHub offers, with five one-minute passes inside a single run so the gap
-between runs is closed from within. Its history is committed to a separate
+workflow (`scripts/probe.mjs`). Its history is committed to a separate
 [`status-data`](https://github.com/tr0llex/status.samoy.love/tree/status-data)
-branch: five commits an hour would bury the actual code changes in `main`.
+branch: a commit per pass would bury the actual code changes in `main`.
+
+**The frequency of that walk is not promised, it is displayed.** The schedule
+asks for a run every five minutes — the finest cron interval GitHub offers —
+but cron there is a request, not an obligation: under load whole batches of
+runs are dropped, and the measured gaps between real runs over a day ranged
+from one hour to three and a half. Nothing can be promised on such a schedule,
+so instead of a frequency the age is computed: the run summary and the message
+of the data commit both say how long the watchdog was away, and a gap longer
+than six hours goes to Telegram as its own message. Without it a silent
+watchdog is indistinguishable from a calm one — the last summary sits in the
+branch looking the same after five minutes and after half a day. The five
+one-minute passes inside a run stayed: a state change is only believed after
+two consecutive passes, and a single point cannot tell a flicker from an
+outage.
 
 **The agent (`agent/`, Go) lives on the host itself, because otherwise the
 important part is invisible.** Systemd unit states, deployed versions and
@@ -67,13 +79,14 @@ and the watchdog explicitly: while the data stays fresh the bot reports outages
 an ongoing outage), and the moment the agent goes silent the watchdog speaks.
 The dead-man switch deliberately exists in both: the bot sees a stale file
 locally (a five-minute threshold), the watchdog sees the absence of fresh data
-from outside (ten minutes; anything lower would produce false alarms given a
-five-minute cron).
+from outside (ten minutes). The watchdog's threshold describes the age of the
+data, not the speed of the reaction: it notices nothing before its own run, and
+its runs happen whenever GitHub gets around to them.
 
 **HTTP 200 proves nothing on its own.** A service answers 200 with a "database
 unavailable" page, with an empty body, after eight seconds, or with a redirect
 to an unrelated host that also answered 200. So a check is described more
-broadly (`config/status.json`, 11 checks across five projects): a marker in the
+broadly (`config/status.json`, 16 checks across seven projects): a marker in the
 body, `Content-Type`, a latency threshold, the final host after redirects, a
 criticality flag and the user-facing consequence of the failure. A project's
 verdict is computed from critical checks only — an internal admin API going

@@ -335,6 +335,39 @@
           "path": "/opt/samoylove-bot/current"
         }
       ]
+    },
+    {
+      "id": "metrics",
+      "title": "Мониторинг",
+      "subtitle": "Prometheus, Grafana и экспортёры · панели под паролем",
+      "url": "https://metrics.samoy.love",
+      "accent": "oklch(0.76 0.13 307)",
+      "//": "Проект заведён ради одной строки — сборки. О выкатке мониторинга до сих пор не узнавал никто: в его цели стоит NOTIFY=never, потому что голос хозяйства один и это бот, а бот рассказывает ровно о том, что перечислено здесь. Про metrics здесь не было ничего.",
+      "//версия": "Взять её по HTTP нельзя ни одним способом: домен целиком за basic-auth, а WRITE_VERSION_FILE=0 — /version.json не пишется вовсе. Поэтому тип сборки release, как у chillhub-api, агента и самого бота: агент живёт на том же хосте, читает симлинк /opt/samoylove-metrics/current, и имя каталога релиза и есть версия. Ничего открывать наружу для этого не нужно.",
+      "//адрес": "Ссылка проекта ведёт на панель и спросит пароль — так и задумано: адрес давно публичен (README мониторинга), закрыто содержимое, а не его существование.",
+      "checks": [
+        {
+          "id": "metrics-health",
+          "name": "Сборщик метрик",
+          "note": "Единственный путь домена, открытый без пароля: nginx проксирует его в /-/healthy Prometheus",
+          "impact": "Метрики не собираются, дашборды и правила тревог слепы. Сайтов и их посетителей не затрагивает",
+          "url": "https://metrics.samoy.love/healthz",
+          "expect": 200,
+          "critical": false,
+          "slowMs": 2000,
+          "expectType": "text/plain",
+          "//bodyIncludes": "Не «Prometheus Server is Healthy» целиком: точную фразу переписывали между версиями Prometheus, и проверка ловила бы обновление образа вместо сбоя.",
+          "bodyIncludes": "Healthy",
+          "cert": "metrics.samoy.love"
+        }
+      ],
+      "builds": [
+        {
+          "title": "Стек",
+          "type": "release",
+          "path": "/opt/samoylove-metrics/current"
+        }
+      ]
     }
   ]
 }
