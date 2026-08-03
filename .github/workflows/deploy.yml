@@ -66,9 +66,19 @@ jobs:
             exit 0
           fi
 
+          # deploy/ — не общий каталог: юнит агента и юнит с verify бота едут
+          # внутрь артефакта соответствующей цели (см. BUILD_CMD в
+          # .deploy-kit/agent.env и bot.env), поэтому каждый файл подтягивает
+          # свою цель, а не обе. Без этих путей пуш, правящий только юнит,
+          # проходил зелёным и не выкатывал ничего: файл в git расходился с
+          # файлом на машине молча — ровно от этого расхождения юниты когда-то
+          # и переехали в артефакт.
+          # Новый файл в deploy/ ничего не сломает: чтобы он куда-то поехал,
+          # его всё равно надо вписать в BUILD_CMD, а .deploy-kit/ — общий и
+          # катит все цели.
           echo "$FILES" | grep -qE '^(src/|public/|astro\.config|tsconfig)' && S=true || S=false
-          echo "$FILES" | grep -qE '^agent/' && A=true || A=false
-          echo "$FILES" | grep -qE '^bot/'   && B=true || B=false
+          echo "$FILES" | grep -qE '^(agent/|deploy/systemd/status-agent\.)' && A=true || A=false
+          echo "$FILES" | grep -qE '^(bot/|deploy/systemd/samoylove-bot\.|deploy/verify-bot\.sh)' && B=true || B=false
           printf 'site=%s\nagent=%s\nbot=%s\n' "$S" "$A" "$B" >> "$GITHUB_OUTPUT"
 
   site:
