@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -80,19 +81,71 @@ func TestBumpBucketStartsNewKeyAndTrims(t *testing.T) {
 	}
 }
 
-func TestUptimeFromBuckets(t *testing.T) {
+func TestBumpBucketMergesAcrossJSONRoundTrip(t *testing.T) {
+	// Между запусками агента история едет через диск, и часовой ключ
+	// возвращается из JSON как float64. Пока сравнение было по fmt.Sprint,
+	// "1.785618e+09" не совпадал с "1785618000" и каждый запуск дописывал
+	// новую корзину: часовые корзины держали минуты вместо часов.
+	key := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC).Unix()
+	var b []bucket
+	for i := 0; i < 4; i++ {
+		b = bumpBucket(b, key, true, 100, hourlyKeep)
+
+		raw, err := json.Marshal(b)
+		if err != nil {
+			t.Fatalf("маршалинг истории: %v", err)
+		}
+		b = nil
+		if err := json.Unmarshal(raw, &b); err != nil {
+			t.Fatalf("разбор истории: %v", err)
+		}
+	}
+	if len(b) != 1 {
+		t.Fatalf("замеры одного часа должны лечь в одну корзину, получили %d: %v", len(b), b)
+	}
+	if total := toInt(b[0][2]); total != 4 {
+		t.Errorf("всего ожидали 4, получили %d", total)
+	}
+	// Ключ, прочитанный с диска, должен находиться тем же окном, что и свежий.
+	if _, ok := indexBuckets(b)[fmt.Sprint(key)]; !ok {
+		t.Errorf("корзина с ключом из JSON не нашлась по ключу %d: %v", key, b)
+	}
+}
+
+func TestIndexBucketsFoldsDuplicateKeys(t *testing.T) {
+	// В уже записанных файлах дубли есть — их наплодил сломанный bumpBucket.
+	// Брать из них последнюю значило бы выкинуть почти все замеры часа.
+	key := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC).Unix()
 	b := []bucket{
-		{"d1", int64(10), int64(10), int64(50)},
-		{"d2", int64(5), int64(10), int64(50)},
+		{float64(key), int64(1), int64(1), int64(100)},
+		{float64(key), int64(0), int64(1), int64(300)},
 	}
-	got := uptimeFromBuckets(b, 2)
-	if got == nil || *got != 75 {
-		t.Fatalf("15 из 20 = 75%%, получили %v", got)
+	got := indexBuckets(b)[fmt.Sprint(key)]
+	if toInt(got[1]) != 1 || toInt(got[2]) != 2 {
+		t.Errorf("дубли должны складываться, получили up=%d total=%d", toInt(got[1]), toInt(got[2]))
 	}
-	// Окно короче истории: берём только хвост.
-	got = uptimeFromBuckets(b, 1)
-	if got == nil || *got != 50 {
-		t.Fatalf("последняя корзина 5 из 10 = 50%%, получили %v", got)
+	if avg := toInt(got[3]); avg != 200 {
+		t.Errorf("среднее (100+300)/2 = 200, получили %d", avg)
+	}
+}
+
+func TestValidateCheckIDsЛовитДубли(t *testing.T) {
+	cfg := Config{Projects: []Project{
+		{ID: "a", Checks: []Check{{ID: "site"}, {ID: "api"}}},
+		{ID: "b", Checks: []Check{{ID: "site"}}},
+	}}
+	err := validateCheckIDs(cfg)
+	if err == nil {
+		t.Fatal("повторяющийся id проверки должен быть ошибкой конфига")
+	}
+	for _, want := range []string{"site", "a", "b"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("в ошибке нет %q: %v", want, err)
+		}
+	}
+	cfg.Projects[1].Checks[0].ID = "site-b"
+	if err := validateCheckIDs(cfg); err != nil {
+		t.Errorf("уникальные id — не ошибка: %v", err)
 	}
 }
 

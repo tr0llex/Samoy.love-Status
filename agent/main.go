@@ -624,8 +624,24 @@ func buildInfo(b Build, client *http.Client) OutBuild {
 
 // ------------------------------------------------------------------ агрегация
 
+// bucketKey приводит ключ корзины к строке независимо от того, откуда он взят.
+//
+// Часовой ключ это unix-время: в коде он int64, а после json.Unmarshal
+// (bucket это [4]any) возвращается float64. fmt.Sprint даёт для них разное —
+// "1785618000" против "1.785618e+09" — и корзина текущего часа, прочитанная с
+// диска, не сливалась с новым замером: агент дописывал по корзине на запуск,
+// то есть раз в минуту. Из-за этого hourlyKeep=2160 покрывал не 90 суток, а
+// полтора, d7 считался по одной корзине (всегда 100%), а спарклайн показывал
+// последние 24 запуска вместо 24 часов.
+func bucketKey(v any) string {
+	if f, ok := v.(float64); ok {
+		return fmt.Sprint(int64(f))
+	}
+	return fmt.Sprint(v)
+}
+
 func bumpBucket(buckets []bucket, key any, ok bool, ms int64, keep int) []bucket {
-	if n := len(buckets); n > 0 && fmt.Sprint(buckets[n-1][0]) == fmt.Sprint(key) {
+	if n := len(buckets); n > 0 && bucketKey(buckets[n-1][0]) == bucketKey(key) {
 		last := &buckets[n-1]
 		up := toInt((*last)[1])
 		total := toInt((*last)[2])
@@ -659,18 +675,6 @@ func toInt(v any) int64 {
 	return 0
 }
 
-func uptimeFromBuckets(buckets []bucket, count int) *float64 {
-	if len(buckets) > count {
-		buckets = buckets[len(buckets)-count:]
-	}
-	var up, total int64
-	for _, b := range buckets {
-		up += toInt(b[1])
-		total += toInt(b[2])
-	}
-	return pct(up, total)
-}
-
 // Аптайм считаем по календарному окну, а не по числу корзин.
 //
 // Корзина заводится только когда агент отработал. Раньше «за 90 дней» брало
@@ -688,10 +692,27 @@ func dayWindow(now time.Time, n int) []string {
 	return keys
 }
 
+// indexBuckets раскладывает корзины по нормализованному ключу. Корзины с
+// одинаковым ключом складываются, а не затирают друг друга: в уже записанных
+// файлах истории такие дубли есть — их наплодил bumpBucket, пока сравнивал
+// ключи разных типов, — и брать из них только последнюю значило бы выкинуть
+// почти все замеры того часа.
 func indexBuckets(buckets []bucket) map[string]bucket {
 	idx := make(map[string]bucket, len(buckets))
 	for _, b := range buckets {
-		idx[fmt.Sprint(b[0])] = b
+		key := bucketKey(b[0])
+		prev, ok := idx[key]
+		if !ok {
+			idx[key] = b
+			continue
+		}
+		up := toInt(prev[1]) + toInt(b[1])
+		total := toInt(prev[2]) + toInt(b[2])
+		avg := int64(0)
+		if total > 0 {
+			avg = (toInt(prev[3])*toInt(prev[2]) + toInt(b[3])*toInt(b[2])) / total
+		}
+		idx[key] = bucket{prev[0], up, total, avg}
 	}
 	return idx
 }
@@ -753,6 +774,26 @@ func uptimeFromRaw(raw []sample, hours int) *float64 {
 }
 
 // ------------------------------------------------------------------ main
+
+// validateCheckIDs требует, чтобы id проверки был уникален во всём конфиге, а
+// не в пределах проекта. Под этим ключом лежит вообще всё, что агент копит:
+// raw/hourly/daily, state.Services, инциденты и карта, из которой проекты
+// разбирают результаты обратно. Два одинаковых id — это две проверки, которые
+// каждую минуту затирают историю друг друга, показываются в обоих проектах
+// одинаково и сливают свои инциденты в один. Конфиг правится руками, поэтому
+// падаем сразу: молча склеенную историю уже не расклеить.
+func validateCheckIDs(cfg Config) error {
+	owner := map[string]string{}
+	for _, p := range cfg.Projects {
+		for _, c := range p.Checks {
+			if prev, ok := owner[c.ID]; ok {
+				return fmt.Errorf("id проверки %q повторяется: проекты %q и %q", c.ID, prev, p.ID)
+			}
+			owner[c.ID] = p.ID
+		}
+	}
+	return nil
+}
 
 func main() {
 	cfgPath := flag.String("config", "/etc/status-agent/status.json", "путь к конфигу")
@@ -844,9 +885,18 @@ func main() {
 		hourly = bumpBucket(hourly, now.Truncate(time.Hour).Unix(), r.ok(), r.ms, hourlyKeep)
 		daily = bumpBucket(daily, now.Format("2006-01-02"), r.ok(), r.ms, dailyKeep)
 
-		_ = writeJSON(rawPath, raw)
-		_ = writeJSON(hourlyPath, hourly)
-		_ = writeJSON(dailyPath, daily)
+		// История не критична для текущего запуска, ронять из-за неё агент не
+		// станем — но и молчать нельзя: незаписанная история это тихо тающие
+		// аптайм и девяностодневная шкала.
+		if err := writeJSON(rawPath, raw); err != nil {
+			log.Printf("история %s не записана: %v", rawPath, err)
+		}
+		if err := writeJSON(hourlyPath, hourly); err != nil {
+			log.Printf("история %s не записана: %v", hourlyPath, err)
+		}
+		if err := writeJSON(dailyPath, daily); err != nil {
+			log.Printf("история %s не записана: %v", dailyPath, err)
+		}
 
 		prev := state.Services[id]
 		since := now.Format(time.RFC3339)
@@ -968,10 +1018,19 @@ func main() {
 	if err := writeJSON(filepath.Join(*dataDir, "state.json"), state); err != nil {
 		log.Fatalf("не удалось записать state.json: %v", err)
 	}
-	_ = writeJSON(filepath.Join(*dataDir, "incidents.json"), incidents)
-	_ = writeJSON(filepath.Join(*dataDir, "releases.json"), releases)
+	incidentsPath := filepath.Join(*dataDir, "incidents.json")
+	if err := writeJSON(incidentsPath, incidents); err != nil {
+		log.Printf("не удалось записать %s: %v", incidentsPath, err)
+	}
+	releasesPath := filepath.Join(*dataDir, "releases.json")
+	if err := writeJSON(releasesPath, releases); err != nil {
+		log.Printf("не удалось записать %s: %v", releasesPath, err)
+	}
 	if err := writeJSON(filepath.Join(*dataDir, "summary.json"), out); err != nil {
 		log.Fatalf("не удалось записать summary.json: %v", err)
+	}
+	if err := validateCheckIDs(cfg); err != nil {
+		log.Fatalf("конфиг %s: %v", *cfgPath, err)
 	}
 
 	var down, slow, aux int
