@@ -354,7 +354,10 @@ function overallStatus(projects) {
     slow += p.slow;
     auxDown += p.auxDown;
   }
-  if (critical === 0) return 'operational';
+  // Критичных проверок нет вовсе — судить не по чему, кроме второстепенных.
+  // Молчать о лежащей второстепенной здесь нельзя: агент в этом же случае
+  // отвечает «частично» (agent/main.go, overallStatus), и сводки разошлись бы.
+  if (critical === 0) return auxDown > 0 ? 'degraded' : 'operational';
   if (down === critical) return 'down';
   if (down / critical >= MAJOR_SHARE) return 'major';
   if (down > 0 || slow > 0 || auxDown > 0) return 'degraded';
@@ -515,8 +518,15 @@ for (const r of results) {
   // писать в Telegram — только когда голос у нас (см. agentAlive выше).
   // Правила о том, что достойно сообщения, те же, что у бота: «медленно» не
   // будит владельца, потому что сервис отвечает.
+  //
+  // Первое наблюдение (prev.status пусто) лежащей проверки инцидент ОТКРЫВАЕТ —
+  // ровно как у агента (agent/main.go, applyIncident: prev == nil). Раньше оно
+  // молчало, и падение, заставшее сторожа без истории — первый запуск, новая
+  // ветка с данными, вычищенный data/, — не попадало ни в историю, ни в
+  // Telegram: до самого восстановления его как будто не было. А сторож нужен
+  // именно тогда, когда агент мёртв, то есть чаще всего ровно в такой момент.
   let since = prev.since ?? new Date(now).toISOString();
-  if (prev.status && status !== prev.status) {
+  if (status !== prev.status) {
     since = new Date(now).toISOString();
     // Второстепенность — в заголовке, ровно как у бота: канал должен читаться
     // одним голосом, а не двумя разными форматами.
