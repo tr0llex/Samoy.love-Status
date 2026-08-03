@@ -9,6 +9,7 @@ const (
 	CmdStatus    = "status"
 	CmdVersions  = "versions"
 	CmdIncidents = "incidents"
+	CmdChangelog = "changelog"
 )
 
 var aliases = map[string]string{
@@ -24,6 +25,10 @@ var aliases = map[string]string{
 	"incidents": CmdIncidents,
 	"i":         CmdIncidents,
 	"log":       CmdIncidents,
+	"changelog": CmdChangelog,
+	"changes":   CmdChangelog,
+	"cl":        CmdChangelog,
+	"c":         CmdChangelog,
 }
 
 // parseCommand достаёт команду из текста сообщения.
@@ -54,4 +59,21 @@ func parseCommand(text, self string) string {
 // Пустая строка означает «не наша команда».
 func resolveCommand(word string) string {
 	return aliases[word]
+}
+
+// commandArg — то, что владелец дописал после команды.
+//
+// Отдельная функция, а не второе значение parseCommand: команда есть у каждого
+// сообщения, а аргумент нужен ровно одной из них (/changelog), и менять
+// подпись, которую зовут из трёх мест, ради одного вызова незачем.
+//
+// Пробелы схлопываются вместе с переводами строк: аргумент набирают с телефона,
+// где автозамена легко добавляет лишний пробел, а «/changelog  metro» и
+// «/changelog metro» обязаны означать одно и то же.
+func commandArg(text string) string {
+	f := strings.Fields(strings.TrimSpace(text))
+	if len(f) < 2 {
+		return ""
+	}
+	return strings.Join(f[1:], " ")
 }

@@ -33,7 +33,13 @@ type Event struct {
 	Duration time.Duration
 	Version  string
 	Previous string
-	At       time.Time
+	// Changelog — что изменилось в этой версии, по строке на пункт. Заполнен
+	// только у релизов и только если выкатка положила список в version.json:
+	// сам бот его составить не может, git-истории выкаченных проектов на
+	// сервере нет. Пустой список означает прежнее сообщение о релизе, а не
+	// отсутствие уведомления.
+	Changelog []string
+	At        time.Time
 }
 
 // Item — что бот уже знает про одну наблюдаемую сущность.
@@ -296,6 +302,9 @@ func (st *State) Apply(s *Summary, now time.Time, remind, stale time.Duration) [
 					URL:     firstNonEmptyStr(b.URL, p.URL),
 					Project: p.ID,
 					Version: b.Version, Previous: prev, At: at,
+					// Что изменилось — из тех же данных, что и версия.
+					// Списка может не быть: тогда сообщение остаётся прежним.
+					Changelog: b.Changelog,
 				})
 			}
 			// Условие только ради dirty: присваивание само по себе

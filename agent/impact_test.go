@@ -496,7 +496,7 @@ func TestЖизненныйЦиклИнцидента(t *testing.T) {
 
 func TestИмяИнцидентаБерётсяИзАктуальногоКонфига(t *testing.T) {
 	incidents := []Incident{
-		{Service: "metro-sw", Name: "Hello Kitty Метро · Service worker"},
+		{Service: "metro-sw", Name: "Метро · Service worker"},
 		{Service: "ушедшая-проверка", Name: "Что-то · Проверка"},
 	}
 	renameIncidents(incidents, map[string]string{

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -430,5 +431,101 @@ func TestСообщениеОРелизеВедётНаКомпонент(t *tes
 	}
 	if !seen {
 		t.Fatal("смена версии не превратилась в событие")
+	}
+}
+
+func TestРелизНесётСписокИзменений(t *testing.T) {
+	// Список бот не составляет и составить не может: git-истории выкаченных
+	// проектов на сервере нет. Он приезжает вместе с версией — из
+	// version.json через summary.json, — и обязан доехать до уведомления.
+	withChangelog := func(at time.Time, version string, cl []string) *Summary {
+		s := summaryAt(at, "up", at, true, version)
+		s.Projects[0].Builds[0].Changelog = cl
+		return s
+	}
+	st := newState()
+	st.Apply(withChangelog(base, "v1", nil), base, 15*time.Minute, 5*time.Minute)
+
+	next := base.Add(time.Minute)
+	events := st.Apply(withChangelog(next, "v2", []string{"обновить nginx до 1.24"}),
+		next, 15*time.Minute, 5*time.Minute)
+	if len(events) != 1 || events[0].Kind != KindRelease {
+		t.Fatalf("смена версии не замечена: %v", kinds(events))
+	}
+	if len(events[0].Changelog) != 1 || events[0].Changelog[0] != "обновить nginx до 1.24" {
+		t.Errorf("список изменений не доехал до события: %+v", events[0].Changelog)
+	}
+	if !strings.Contains(formatEvent(events[0]), "• обновить nginx до 1.24") {
+		t.Errorf("список изменений не попал в сообщение:\n%s", formatEvent(events[0]))
+	}
+
+	// Выкатка, которая ничего не публикует, обязана дать прежнее сообщение:
+	// changelog — украшение, а не условие уведомления.
+	after := next.Add(time.Minute)
+	events = st.Apply(withChangelog(after, "v3", nil), after, 15*time.Minute, 5*time.Minute)
+	if len(events) != 1 || events[0].Kind != KindRelease {
+		t.Fatalf("релиз без списка изменений не замечен: %v", kinds(events))
+	}
+	if strings.Contains(formatEvent(events[0]), "Изменения") {
+		t.Errorf("блок изменений появился без данных:\n%s", formatEvent(events[0]))
+	}
+}
+
+func TestСписокИзмененийЧитаетсяИзSummaryJSON(t *testing.T) {
+	// Имя поля — договор между агентом и ботом (agent/main.go, OutBuild).
+	// Опечатка в нём выключила бы список молча: релиз объявляется по-прежнему,
+	// просто без изменений, и понять, что что-то сломалось, неоткуда.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "summary.json")
+	raw := `{"updated":"2026-08-02T12:00:00Z","overall":"operational","projects":[` +
+		`{"id":"snakes","title":"Snakes","builds":[` +
+		`{"title":"Сервер","version":"v2","at":"2026-08-02T12:00:00Z",` +
+		`"changelog":["обновить nginx до 1.24","…и ещё 3 коммита"]}]}]}`
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := loadSummary(path)
+	if err != nil {
+		t.Fatalf("данные не прочитаны: %v", err)
+	}
+	got := s.Projects[0].Builds[0].Changelog
+	if len(got) != 2 || got[0] != "обновить nginx до 1.24" {
+		t.Fatalf("поле changelog не доехало из summary.json: %q", got)
+	}
+
+	// Файл без поля читается по-прежнему: у старого агента и у целей, чья
+	// выкатка ничего не публикует, его нет и не будет.
+	old := filepath.Join(dir, "old.json")
+	if err := os.WriteFile(old, []byte(`{"projects":[{"id":"x","builds":[{"title":"t","version":"v1"}]}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err = loadSummary(old)
+	if err != nil {
+		t.Fatalf("данные без списка изменений не прочитаны: %v", err)
+	}
+	if len(s.Projects[0].Builds[0].Changelog) != 0 {
+		t.Error("список изменений взялся из ниоткуда")
+	}
+}
+
+func TestЧужойФорматСпискаНеЛишаетУведомлений(t *testing.T) {
+	// Разбор списка изменений не имеет права провалиться. Ошибка здесь —
+	// это ошибка loadSummary, после которой цикл наблюдения молчит обо
+	// ВСЁМ: о падениях, о восстановлениях, о релизах. Цена украшения в
+	// такой момент — весь бот, а не строчка в сообщении.
+	dir := t.TempDir()
+	for i, cl := range []string{`42`, `null`, `{"было":"стало"}`, `"строкой\nв две строки"`} {
+		path := filepath.Join(dir, fmt.Sprintf("s%d.json", i))
+		raw := `{"projects":[{"id":"x","builds":[{"title":"t","version":"v1","changelog":` + cl + `}]}]}`
+		if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		s, err := loadSummary(path)
+		if err != nil {
+			t.Fatalf("changelog=%s: данные не прочитаны целиком: %v", cl, err)
+		}
+		if s.Projects[0].Builds[0].Version != "v1" {
+			t.Errorf("changelog=%s: версия потеряна", cl)
+		}
 	}
 }

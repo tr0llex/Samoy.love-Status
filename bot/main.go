@@ -144,7 +144,11 @@ func main() {
 			}
 
 			for _, e := range events {
-				if err := tg.SendWith(ctx, cfg.Owner, formatEvent(e), alertKeyboard(e.Project)); err != nil {
+				// SendLong, а не SendWith: список выкаченных коммитов больше не
+				// режется, и релиз на сорок тем в одно сообщение не влезает.
+				// Частичная неудача внутри такой отправки — это ошибка целиком,
+				// иначе владелец увидел бы половину списка и принял её за весь.
+				if err := tg.SendLong(ctx, cfg.Owner, formatEvent(e), alertKeyboard(e.Project)); err != nil {
 					metrics.sendFailed()
 					log.Printf("уведомление не отправлено (%s %s): %v", e.Kind, e.Key, err)
 					continue
@@ -276,9 +280,14 @@ func handleUpdate(ctx context.Context, tg *Telegram, u Update, owner, ownerUser 
 	metrics.command(cmd)
 	log.Printf("команда /%s", cmd)
 
-	view := viewOf(cmd)
+	// Аргумент есть только у /changelog: «/changelog metro» — про одну цель,
+	// «/changelog» — про всё хозяйство. Остальные команды его игнорируют, как
+	// и раньше: «/status всё ли живо» — это /status.
+	view := viewFor(cmd, commandArg(u.Message.Text))
 	text, kb := renderView(view, summaryPath, time.Now().UTC())
-	if err := tg.SendWith(ctx, owner, text, kb); err != nil {
+	// SendLong: «/changelog» по всему хозяйству — самый длинный ответ бота, и с
+	// полными списками изменений он в одно сообщение не помещается.
+	if err := tg.SendLong(ctx, owner, text, kb); err != nil {
 		metrics.sendFailed()
 		log.Printf("ответ на /%s не отправлен: %v", cmd, err)
 	}
