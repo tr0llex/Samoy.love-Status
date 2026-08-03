@@ -92,6 +92,47 @@ func TestGetUpdates(t *testing.T) {
 	}
 }
 
+// Токен лежит прямо в адресе запроса, а http.Client печатает адрес в тексте
+// транспортной ошибки. Эта ошибка логируется на каждом моргании сети, то есть
+// регулярно, — значит токена в ней быть не должно ни при каких условиях.
+func TestTransportErrorHidesToken(t *testing.T) {
+	const token = "123456:AA-secret-bot-token"
+	// Сервер поднимаем и сразу гасим: получаем заведомо закрытый порт, то есть
+	// настоящий транспортный сбой, не выходя в сеть.
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	srv.Close()
+
+	tg := newTelegram(token, time.Second)
+	tg.base = srv.URL
+
+	for _, c := range []struct {
+		name string
+		call func() error
+	}{
+		{"sendMessage", func() error { return tg.Send(context.Background(), 1, "текст") }},
+		{"getUpdates", func() error {
+			_, err := tg.GetUpdates(context.Background(), 0, time.Second)
+			return err
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			err := c.call()
+			if err == nil {
+				t.Fatal("закрытый порт должен быть ошибкой")
+			}
+			if strings.Contains(err.Error(), token) {
+				t.Fatalf("токен утёк в текст ошибки: %v", err)
+			}
+			if strings.Contains(err.Error(), srv.URL) {
+				t.Fatalf("адрес запроса остался в ошибке — вместе с ним вернётся и токен: %v", err)
+			}
+			if !strings.Contains(err.Error(), c.name) {
+				t.Errorf("из ошибки пропал метод, по которому её опознают в журнале: %v", err)
+			}
+		})
+	}
+}
+
 func TestGetUpdatesBrokenResponse(t *testing.T) {
 	tg := testBot(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)

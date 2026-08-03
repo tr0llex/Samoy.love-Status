@@ -196,7 +196,7 @@ func main() {
 					st.Offset = u.UpdateID + 1
 				}
 				mu.Unlock()
-				handleUpdate(ctx, tg, u, cfg.Owner, cfg.Self, summaryPath)
+				handleUpdate(ctx, tg, u, cfg.Owner, cfg.OwnerUser, cfg.Self, summaryPath)
 			}
 			if len(updates) > 0 {
 				mu.Lock()
@@ -241,13 +241,21 @@ func selfTest(ctx context.Context, tg *Telegram, owner int64, summaryPath string
 //
 // Чужие чаты игнорируются молча: любой ответ незнакомцу — это подтверждение,
 // что бот жив и слушает, и приглашение продолжать.
-func handleUpdate(ctx context.Context, tg *Telegram, u Update, owner int64, self, summaryPath string) {
+func handleUpdate(ctx context.Context, tg *Telegram, u Update, owner, ownerUser int64, self, summaryPath string) {
 	// Нажатие на кнопку: перерисовываем тот же экран на месте.
 	if q := u.CallbackQuery; q != nil {
-		handleCallback(ctx, tg, q, owner, summaryPath)
+		handleCallback(ctx, tg, q, owner, ownerUser, summaryPath)
 		return
 	}
 	if u.Message == nil || u.Message.Chat.ID != owner {
+		return
+	}
+	// Совпадения чата мало: в личной переписке это и есть владелец, а в группе
+	// в тот же чат пишут все. Поэтому, когда владелец известен поимённо,
+	// сверяем отправителя. Сообщение без From (посты в канале) судим
+	// по-прежнему только по чату — иначе бот замолчал бы там, где раньше
+	// отвечал.
+	if ownerUser > 0 && u.Message.From.ID != 0 && u.Message.From.ID != ownerUser {
 		return
 	}
 	word := parseCommand(u.Message.Text, self)

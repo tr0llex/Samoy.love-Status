@@ -67,8 +67,13 @@ func renderView(view, summaryPath string, now time.Time) (string, *Keyboard) {
 // Отвечать Telegram надо всегда и как можно раньше: пока ответа нет, на
 // кнопке у владельца крутятся часики. Поэтому сначала гасим их, а потом уже
 // перерисовываем сообщение.
-func handleCallback(ctx context.Context, tg *Telegram, q *CallbackQuery, owner int64, summaryPath string) {
-	if q.From.ID != owner {
+//
+// Владелец здесь проверяется по ownerUser, а не по owner: нажатие приносит id
+// человека, а chat id — это адрес, куда отвечать. Если владелец не задан
+// (в TELEGRAM_CHAT_ID группа, TELEGRAM_OWNER_ID пуст), подтвердить право
+// нажимающего нечем, и кнопка не срабатывает — ровно как и раньше.
+func handleCallback(ctx context.Context, tg *Telegram, q *CallbackQuery, owner, ownerUser int64, summaryPath string) {
+	if ownerUser <= 0 || q.From.ID != ownerUser {
 		// Чужому не отвечаем содержимым, но часики гасим: иначе кнопка у него
 		// будет «висеть», и это само по себе подсказка, что бот живой.
 		_ = tg.AnswerCallback(ctx, q.ID, "")

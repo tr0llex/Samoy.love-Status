@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -44,6 +46,12 @@ type Message struct {
 	Chat      struct {
 		ID int64 `json:"id"`
 	} `json:"chat"`
+	// From — кто написал. В личной переписке совпадает с Chat.ID, в группе —
+	// нет: там по chat id владельца не отличить от остальных участников.
+	// Поле необязательное: у постов в канале отправителя нет.
+	From struct {
+		ID int64 `json:"id"`
+	} `json:"from"`
 	Text string `json:"text"`
 }
 
@@ -83,26 +91,66 @@ type apiResponse struct {
 	Description string          `json:"description"`
 }
 
+// redactedError — сетевая ошибка без адреса запроса.
+//
+// Причина сохраняется через Unwrap: errors.Is по context.Canceled и по
+// сетевым ошибкам продолжает работать, наружу не выводится только текст.
+type redactedError struct {
+	msg   string
+	cause error
+}
+
+func (e *redactedError) Error() string { return e.msg }
+func (e *redactedError) Unwrap() error { return e.cause }
+
+// redact срезает с ошибки адрес запроса.
+//
+// Токен лежит в самом пути (/bot<token>/<method>), а http.Client заворачивает
+// транспортные сбои в *url.Error, чей Error() печатает адрес целиком. Такая
+// ошибка попадает в журнал на каждом моргании сети и каждом 502 от Telegram
+// (цикл команд в main.go пишет её по своему же комментарию регулярно) — и
+// токен оказывается в journald открытым текстом. Прочитавший журнал получает
+// полный контроль над ботом, поэтому в тексте ошибки остаются только метод и
+// причина. Токен на всякий случай вычищается и из причины: она приходит из
+// чужого кода, и ручаться за её содержимое нельзя.
+func (t *Telegram) redact(method string, err error) error {
+	if err == nil {
+		return nil
+	}
+	cause := err
+	var ue *url.Error
+	if errors.As(err, &ue) && ue.Err != nil {
+		cause = ue.Err
+	}
+	msg := cause.Error()
+	if t.token != "" {
+		msg = strings.ReplaceAll(msg, t.token, "<токен>")
+	}
+	return &redactedError{msg: method + ": " + msg, cause: cause}
+}
+
 func (t *Telegram) call(ctx context.Context, method string, payload any, result any) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	url := fmt.Sprintf("%s/bot%s/%s", t.base, t.token, method)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	// Токен лежит прямо в адресе, поэтому ЛЮБАЯ ошибка отсюда и ниже уходит
+	// наружу только через redact: см. комментарий к нему.
+	endpoint := fmt.Sprintf("%s/bot%s/%s", t.base, t.token, method)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return t.redact(method, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := t.client.Do(req)
 	if err != nil {
-		return err
+		return t.redact(method, err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
-		return err
+		return t.redact(method, err)
 	}
 	var out apiResponse
 	if err := json.Unmarshal(raw, &out); err != nil {

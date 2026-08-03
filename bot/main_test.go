@@ -45,13 +45,17 @@ func writeSummary(t *testing.T) string {
 func message(chat int64, text string) Update {
 	u := Update{UpdateID: 1, Message: &Message{Text: text}}
 	u.Message.Chat.ID = chat
+	// В личной переписке id чата и id отправителя — одно и то же число.
+	// Повторяем это здесь, чтобы проверка отправителя работала на настоящих
+	// данных, а не проскакивала мимо пустого From.
+	u.Message.From.ID = chat
 	return u
 }
 
 func TestForeignChatIgnoredSilently(t *testing.T) {
 	var sent []string
 	tg := recorder(t, &sent)
-	handleUpdate(context.Background(), tg, message(999, "/status"), owner, "samoy_love_bot", writeSummary(t))
+	handleUpdate(context.Background(), tg, message(999, "/status"), owner, owner, "samoy_love_bot", writeSummary(t))
 	if len(sent) != 0 {
 		t.Fatalf("на чужое сообщение бот ответил: %v", sent)
 	}
@@ -75,7 +79,7 @@ func TestReplyToOwner(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			var sent []string
 			tg := recorder(t, &sent)
-			handleUpdate(context.Background(), tg, message(owner, c.text), owner, "samoy_love_bot", summary)
+			handleUpdate(context.Background(), tg, message(owner, c.text), owner, owner, "samoy_love_bot", summary)
 			if len(sent) != 1 {
 				t.Fatalf("ожидали один ответ, получили %d: %v", len(sent), sent)
 			}
@@ -86,11 +90,36 @@ func TestReplyToOwner(t *testing.T) {
 	}
 }
 
+// В группе id чата общий на всех: проверка «сообщение пришло в нужный чат»
+// пропускает любого участника. Поэтому, когда владелец задан явно
+// (TELEGRAM_OWNER_ID), сверяется и отправитель.
+func TestGroupChatObeysOnlyOwner(t *testing.T) {
+	const group = int64(-1001234567890)
+	summary := writeSummary(t)
+
+	stranger := message(group, "/status")
+	stranger.Message.From.ID = 42
+	var sent []string
+	tg := recorder(t, &sent)
+	handleUpdate(context.Background(), tg, stranger, group, owner, "samoy_love_bot", summary)
+	if len(sent) != 0 {
+		t.Fatalf("бот выполнил команду постороннего участника группы: %v", sent)
+	}
+
+	mine := message(group, "/status")
+	mine.Message.From.ID = owner
+	sent = nil
+	handleUpdate(context.Background(), tg, mine, group, owner, "samoy_love_bot", summary)
+	if len(sent) != 1 {
+		t.Fatalf("владельцу бот обязан ответить, ответов %d", len(sent))
+	}
+}
+
 func TestPlainTextGetsNoReply(t *testing.T) {
 	var sent []string
 	tg := recorder(t, &sent)
 	// Обычная реплика в чате — не повод отвечать: бот не собеседник.
-	handleUpdate(context.Background(), tg, message(owner, "как дела"), owner, "samoy_love_bot", writeSummary(t))
+	handleUpdate(context.Background(), tg, message(owner, "как дела"), owner, owner, "samoy_love_bot", writeSummary(t))
 	if len(sent) != 0 {
 		t.Fatalf("бот ответил на обычный текст: %v", sent)
 	}
@@ -101,7 +130,7 @@ func TestMissingDataIsReported(t *testing.T) {
 	tg := recorder(t, &sent)
 	// Агент не создал файл — владелец должен узнать об этом, а не получить
 	// пустой ответ.
-	handleUpdate(context.Background(), tg, message(owner, "/status"), owner, "", filepath.Join(t.TempDir(), "нет.json"))
+	handleUpdate(context.Background(), tg, message(owner, "/status"), owner, owner, "", filepath.Join(t.TempDir(), "нет.json"))
 	if len(sent) != 1 || !strings.Contains(sent[0], "данные агента") {
 		t.Fatalf("о недоступных данных не сообщено: %v", sent)
 	}
@@ -151,6 +180,45 @@ func TestEnvDuration(t *testing.T) {
 	t.Setenv("REMIND_INTERVAL", "")
 	if got := envDuration("REMIND_INTERVAL", 15*time.Minute); got != 15*time.Minute {
 		t.Errorf("без переменной ожидали значение по умолчанию, получили %s", got)
+	}
+}
+
+// Владелец по умолчанию — тот же, что и чат: в личной переписке это одно и то
+// же число, и настраивать отдельно нечего. Отдельная переменная нужна только
+// групповому чату, где по chat id владельца не опознать.
+func TestOwnerUserDefaultsToChat(t *testing.T) {
+	t.Setenv("TELEGRAM_BOT_TOKEN", "не-настоящий")
+	t.Setenv("TELEGRAM_CHAT_ID", "173418650")
+
+	c, err := loadConfig()
+	if err != nil {
+		t.Fatalf("настройки не прочитаны: %v", err)
+	}
+	if c.OwnerUser != c.Owner {
+		t.Errorf("в личной переписке владелец должен совпадать с чатом: %d и %d", c.OwnerUser, c.Owner)
+	}
+
+	// Группа без явного владельца: подтвердить права нечем, и бот об этом
+	// говорит в журнале, а не делает вид, что всё в порядке.
+	t.Setenv("TELEGRAM_CHAT_ID", "-1001234567890")
+	if c, err = loadConfig(); err != nil {
+		t.Fatalf("групповой чат не должен ронять бота: %v", err)
+	}
+	if c.OwnerUser != 0 {
+		t.Errorf("по id группы владелец не определяется, получили %d", c.OwnerUser)
+	}
+
+	t.Setenv("TELEGRAM_OWNER_ID", "173418650")
+	if c, err = loadConfig(); err != nil {
+		t.Fatalf("настройки не прочитаны: %v", err)
+	}
+	if c.OwnerUser != 173418650 || c.Owner != -1001234567890 {
+		t.Errorf("владелец и чат перепутаны: владелец %d, чат %d", c.OwnerUser, c.Owner)
+	}
+
+	t.Setenv("TELEGRAM_OWNER_ID", "не число")
+	if _, err := loadConfig(); err == nil {
+		t.Error("мусор в TELEGRAM_OWNER_ID должен быть виден сразу, а не молча отключать проверку")
 	}
 }
 
