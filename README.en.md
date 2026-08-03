@@ -25,7 +25,7 @@ Telegram bot wakes the owner before a user does.
 ```mermaid
 flowchart LR
     subgraph host["single host"]
-        svc["services<br/>Launcher · Snakes · Metro<br/>Card · Status · Monitoring"]
+        svc["services<br/>Launcher · Snakes · Double or Die<br/>Metro · Card · Status · Monitoring"]
         agent["agent<br/>Go, every minute"]
         json[("summary.json")]
         page["page<br/>Astro"]
@@ -86,7 +86,7 @@ its runs happen whenever GitHub gets around to them.
 **HTTP 200 proves nothing on its own.** A service answers 200 with a "database
 unavailable" page, with an empty body, after eight seconds, or with a redirect
 to an unrelated host that also answered 200. So a check is described more
-broadly (`config/status.json`, 12 checks across six projects): a marker in the
+broadly (`config/status.json`, 16 checks across seven projects): a marker in the
 body, `Content-Type`, a latency threshold, the final host after redirects, a
 criticality flag and the user-facing consequence of the failure. A project's
 verdict is computed from critical checks only — an internal admin API going
