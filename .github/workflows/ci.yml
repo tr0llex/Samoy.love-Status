@@ -64,7 +64,13 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: agent/go.mod
-          cache-dependency-path: agent/go.sum
+          # go.sum в agent/ нет — оба модуля обходятся стандартной
+          # библиотекой, без внешних зависимостей. cache-dependency-path на
+          # go.sum не резолвился ни в один файл, и actions/setup-go молча
+          # переставал кэшировать (warning "Some specified paths were not
+          # resolved" в логе). go.mod существует всегда, поэтому ключ кэша
+          # считаем по нему.
+          cache-dependency-path: agent/go.mod
 
       - name: go vet
         working-directory: agent
@@ -99,7 +105,8 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: bot/go.mod
-          cache-dependency-path: bot/go.sum
+          # См. комментарий у джобы agent: go.sum в bot/ тоже нет.
+          cache-dependency-path: bot/go.mod
 
       - name: go vet
         working-directory: bot
@@ -171,7 +178,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: agent/go.mod
-          cache-dependency-path: agent/go.sum
+          cache-dependency-path: agent/go.mod
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -212,6 +219,11 @@ jobs:
 
       - name: Системные библиотеки для Chromium
         if: steps.pw-cache.outputs.cache-hit == 'true'
+        # apt через npx playwright install-deps обычно укладывается в
+        # секунды, но однажды завис на медленном зеркале и растянул весь
+        # прогон до 26 минут вместо обычных 2-4. Короткий таймаут роняет
+        # такое зависание быстро, а не съедает лимит джобы целиком.
+        timeout-minutes: 5
         run: npx playwright install-deps chromium
 
       # Конфиг сам собирает страницу и поднимает preview. Данные проверок
