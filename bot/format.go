@@ -609,7 +609,7 @@ func formatEvent(e Event) string {
 		// длинный, самый необязательный и единственный, которого может не
 		// быть. Всё, ради чего уведомление читают в первую очередь (что
 		// обновилось и до какой версии), остаётся выше и на прежнем месте.
-		if cl := formatChangelog(e.Changelog); cl != "" {
+		if cl := formatChangelog(e.Changelog, repoFromCommitURL(e.CommitURL)); cl != "" {
 			s += "\n\n" + cl
 		}
 		return s
@@ -937,7 +937,7 @@ func formatDeployGroup(project string, ds []Deploy) string {
 	}
 	// Список изменений — ОДИН РАЗ на прогон и последним блоком, ровно как в
 	// сообщении об одной цели.
-	if cl := formatChangelog(runChangelog(targets)); cl != "" {
+	if cl := formatChangelog(runChangelog(targets), runRepoURL(targets)); cl != "" {
 		b.WriteString("\n\n" + cl)
 	}
 	return b.String()
@@ -1052,6 +1052,18 @@ func runChangelog(ds []Deploy) []string {
 	return nil
 }
 
+// runRepoURL — репозиторий прогона. Цели одного прогона живут в одном
+// репозитории по построению (ключ группы включает github.repository), поэтому
+// годится первый известный адрес коммита.
+func runRepoURL(ds []Deploy) string {
+	for _, d := range ds {
+		if u := repoFromCommitURL(d.CommitURL); u != "" {
+			return u
+		}
+	}
+	return ""
+}
+
 func latestAt(ds []Deploy) time.Time {
 	var at time.Time
 	for _, d := range ds {
@@ -1137,12 +1149,15 @@ const (
 // в теме коммита достаточно, чтобы разметка стала невалидной. На такую
 // разметку Telegram отвечает ошибкой — то есть уведомление о релизе не
 // приходит совсем, и вместо украшения получается потерянное сообщение.
-func formatChangelog(lines []string) string {
+func formatChangelog(lines []string, repoURL string) string {
 	// Неразобранные строки всё равно считаются: хвост «…и ещё N» обязан
 	// говорить про весь список, а не про ту его часть, до которой дошли руки.
 	scanned := scanLines(lines)
 	unscanned := len(lines) - len(scanned)
 	items, tail := changelogItems(scanned)
+	// Номер PR приезжает голым: разметку срезает доставка события. Ссылку
+	// строим сами, из проверенного адреса репозитория.
+	items = linkifyPullRefs(items, repoURL)
 	if len(items) == 0 {
 		return ""
 	}
@@ -1306,6 +1321,59 @@ func (it clItem) render() string {
 		s += " " + refLinkHTML(it.href, it.label)
 	}
 	return s
+}
+
+// pullRefRe — хвост «#21», который GitHub дописывает к теме при сквош-мерже.
+// Только в конце строки: «#5» посреди темы («починить #5 из списка») номером
+// PR не является, и уводить читателя по нему некуда.
+var pullRefRe = regexp.MustCompile(`\s+#([0-9]{1,9})$`)
+
+// repoFromCommitURL достаёт адрес репозитория из адреса коммита.
+//
+// Пусто, если адрес не прошёл commitURLRe: доверять здесь можно только тому,
+// что уже проверено, иначе ссылка на PR стала бы способом увести читателя
+// куда угодно чужой строкой из события.
+func repoFromCommitURL(commitURL string) string {
+	if !commitURLRe.MatchString(commitURL) {
+		return ""
+	}
+	base, _, ok := strings.Cut(commitURL, "/commit/")
+	if !ok {
+		return ""
+	}
+	return base
+}
+
+// linkifyPullRefs возвращает номеру PR ссылку, которую он потерял по дороге.
+//
+// Генератор списка (deploy-kit/bin/changelog) отдаёт «тема <a …>#21</a>», но
+// доставка события срезает разметку намеренно: в событии обязан лежать простой
+// текст, иначе бот получает недоверенный HTML (docs/events.md §4). До читателя
+// номер доезжал голым, и из чата в PR было не уйти.
+//
+// Поэтому ссылка не ПРОВОЗИТСЯ, а СТРОИТСЯ здесь — из адреса репозитория,
+// который бот и так знает по проверенному адресу коммита. Ничего чужого в
+// href не попадает: от строки события берётся только число.
+//
+// splitRefLink остаётся на месте и разбирает случай, когда ссылка всё же
+// приехала: путь «файл собран мимо агента» (summary.json) её сохраняет.
+func linkifyPullRefs(items []clItem, repoURL string) []clItem {
+	if repoURL == "" {
+		return items
+	}
+	for i, it := range items {
+		if it.href != "" {
+			continue
+		}
+		m := pullRefRe.FindStringSubmatch(it.text)
+		if m == nil {
+			continue
+		}
+		items[i].text = strings.TrimSpace(it.text[:len(it.text)-len(m[0])])
+		items[i].href = repoURL + "/pull/" + m[1]
+		items[i].label = "#" + m[1]
+	}
+	return items
 }
 
 // isChangelogHeader — эта строка и есть заголовок блока.

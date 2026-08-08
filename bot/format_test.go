@@ -366,7 +366,7 @@ func TestИзмененияЭкранируются(t *testing.T) {
 		"поднять go до 1.22 <-- важно",
 		"<b>жирный</b> & <i>курсив</i>",
 		`закрыть <a href="javascript:alert(1)">дыру</a>`,
-	})
+	}, "")
 	if strings.Contains(got, "<-- важно") || strings.Contains(got, "<b>жирный") ||
 		strings.Contains(got, "<a href") || strings.Contains(got, "<i>") {
 		t.Errorf("чужая разметка уехала в сообщение как есть:\n%s", got)
@@ -417,7 +417,7 @@ func TestХвостГенератораНеСтановитсяПунктом(t 
 	// deploy-kit/bin/changelog заканчивает блок строкой «…и ещё 12 коммитов».
 	// Она приезжает сюда такой же строкой, как и темы коммитов, но пунктом
 	// списка не является.
-	got := formatChangelog([]string{"обновить nginx до 1.24", "…и ещё 12 коммитов"})
+	got := formatChangelog([]string{"обновить nginx до 1.24", "…и ещё 12 коммитов"}, "")
 	if strings.Contains(got, "• …и ещё") {
 		t.Errorf("хвост получил маркер пункта:\n%s", got)
 	}
@@ -425,7 +425,7 @@ func TestХвостГенератораНеСтановитсяПунктом(t 
 		t.Errorf("хвост не сохранён:\n%s", got)
 	}
 	// Одного хвоста без пунктов мало: блок «Изменения» ни о чём не сообщает.
-	if got := formatChangelog([]string{"…и ещё 12 коммитов"}); got != "" {
+	if got := formatChangelog([]string{"…и ещё 12 коммитов"}, ""); got != "" {
 		t.Errorf("блок собрался из одного хвоста: %q", got)
 	}
 }
@@ -446,7 +446,7 @@ func TestБотРазбираетВыводГенератораСам(t *testing
 		"• поднять go до 1.22 &lt;-- важно",
 		"- перевести карту на новый тайлсет",
 		"…и ещё 3 коммита",
-	})
+	}, "")
 
 	if strings.Count(got, "Изменения") != 1 {
 		t.Errorf("заголовок задвоился:\n%s", got)
@@ -478,7 +478,7 @@ func TestБотРазбираетВыводГенератораСам(t *testing
 
 	// Один заголовок без пунктов — не блок: сообщение о релизе обязано
 	// остаться прежним, а не получить пустую шапку.
-	if g := formatChangelog([]string{"<b>Изменения</b>", "Изменения", "•", "-"}); g != "" {
+	if g := formatChangelog([]string{"<b>Изменения</b>", "Изменения", "•", "-"}, ""); g != "" {
 		t.Errorf("блок собрался из одной разметки: %q", g)
 	}
 }
@@ -486,7 +486,7 @@ func TestБотРазбираетВыводГенератораСам(t *testing
 func TestМногострочнаяТемаНеРвётСписок(t *testing.T) {
 	// Тема приходит многострочной, если в сообщении коммита нет пустой
 	// строки после первой. В пункт списка это не годится.
-	got := formatChangelog([]string{"исправить падение\nна пустом конфиге\tи не только"})
+	got := formatChangelog([]string{"исправить падение\nна пустом конфиге\tи не только"}, "")
 	if strings.Count(got, "\n") != 1 {
 		t.Errorf("пункт разорвал список:\n%s", got)
 	}
@@ -554,7 +554,7 @@ func TestТемаВ120СимволовДоезжаетЦеликом(t *testing.
 
 	// Вход — ровно то, что печатает deploy-kit/bin/changelog: заголовок,
 	// маркер, экранированный текст. Этот путь описан в summary.go как рабочий.
-	got := formatChangelog([]string{"<b>Изменения</b>", "• " + subject})
+	got := formatChangelog([]string{"<b>Изменения</b>", "• " + subject}, "")
 	if !strings.Contains(got, "• "+subject) {
 		t.Errorf("тема в 120 символов не доехала целиком:\n%s", got)
 	}
@@ -663,7 +663,7 @@ func TestПолныйСписокГенератораНеОбрезаетсяБ�
 		lines = append(lines, "• "+item)
 	}
 
-	got := formatChangelog(lines)
+	got := formatChangelog(lines, "")
 	if n := strings.Count(got, "\n• "); n != 8 {
 		t.Fatalf("пунктов %d, ожидали 8:\n%s", n, got)
 	}
@@ -692,7 +692,7 @@ func TestВраньёВПолеЗажимаетсяПоСимволам(t *testi
 	// в одном пункте они обязаны сработать.
 	hostile := strings.Repeat("я", 500)
 
-	got := formatChangelog([]string{hostile})
+	got := formatChangelog([]string{hostile}, "")
 	line, ok := strings.CutPrefix(got, "<b>Изменения</b>\n• ")
 	if !ok {
 		t.Fatalf("блок собран не по формату:\n%s", got)
