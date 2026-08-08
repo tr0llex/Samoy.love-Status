@@ -30,6 +30,12 @@ linters:
         - (*crypto/tls.Conn).Close
     misspell:
       locale: US
+      # `neighbours` — не опечатка, а слово из контракта событий выкатки
+      # (deploy-kit/docs/events.md: причина `neighbours_failed`, переменная
+      # NEIGHBOURS в описаниях целей). Починить «опечатку» здесь значит
+      # перестать понимать то, что присылает выкатка.
+      ignore-rules:
+        - neighbours
 
 formatters:
   enable:
