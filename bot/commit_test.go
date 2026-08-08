@@ -129,24 +129,30 @@ func TestВерсияСРазметкойЭкранируетсяДажеСоС�
 	}
 }
 
-func TestАдресКоммитаДоезжаетИзДанныхАгентаВСобытие(t *testing.T) {
+func TestАдресКоммитаДоезжаетИзЖурналаВСобытие(t *testing.T) {
 	// Проверяем стык, а не только рисование: поле обязано пройти путь
-	// summary.json → Build → Event, иначе ссылка есть в данных и нет в чате.
-	s := &Summary{
-		Updated: base.Format(time.RFC3339),
-		Projects: []Project{{
-			ID: "status", Title: "Статус", URL: "https://status.samoy.love/",
-			Builds: []Build{{Title: "Страница", Version: "v1", CommitURL: relCommit}},
-		}},
+	// файл события → DeployEvent, иначе ссылка есть в журнале и нет в чате.
+	//
+	// Раньше этот стык проверялся на пути summary.json → Build → Event: релиз
+	// выводился из разницы снимков версий. Тот путь удалён вместе с самой
+	// механикой — она и теряла выкатки, случившиеся между двумя наблюдениями.
+	// Проверка осталась, потому что осталось требование: связь «коммит →
+	// выкатка» в сообщении выражена ровно этой ссылкой, и её потеря молчалива.
+	dir := t.TempDir()
+	const ms = 1785924102123
+
+	e := inboxEvent(ms, "status-site", evSuccess)
+	e["commitURL"] = relCommit
+	name := inboxWrite(t, dir, ms, "status-site", evSuccess, e)
+
+	st := inboxState()
+	events := newInbox(dir).Poll(st, inboxNow(t))
+
+	if len(events) != 1 {
+		t.Fatalf("событие из журнала не прочитано: %d", len(events))
 	}
-	st := newState()
-	st.Apply(s, base, 15*time.Minute, 5*time.Minute)
-
-	s.Projects[0].Builds[0].Version = "v2"
-	events := st.Apply(s, base.Add(time.Minute), 15*time.Minute, 5*time.Minute)
-
-	if len(events) != 1 || events[0].Kind != KindRelease {
-		t.Fatalf("смена версии не замечена: %v", kinds(events))
+	if events[0].File != name {
+		t.Errorf("прочитано не то событие: %q", events[0].File)
 	}
 	if events[0].CommitURL != relCommit {
 		t.Errorf("адрес коммита не доехал до события: %q", events[0].CommitURL)
