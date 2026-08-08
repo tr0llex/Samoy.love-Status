@@ -31,6 +31,7 @@ jobs:
   commits:
     name: Коммиты без упоминаний ИИ
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
@@ -57,6 +58,7 @@ jobs:
   agent:
     name: Агент (Go)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -91,6 +93,7 @@ jobs:
   bot:
     name: Бот (Go)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -125,6 +128,7 @@ jobs:
   page:
     name: Страница
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -161,6 +165,7 @@ jobs:
   conformance:
     name: Агент и сторож судят одинаково
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -175,6 +180,7 @@ jobs:
   e2e:
     name: Сквозные тесты
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     # Проверка после выкатки смотрит на код ответа. Статус-страница отдаёт 200
     # даже когда данных нет, скрипт упал на неожиданном поле и на экране пусто.
