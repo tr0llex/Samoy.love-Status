@@ -629,4 +629,3 @@ func groupViewOf(it outboxItem, rec *groupRecord) groupView {
 	}
 	return v
 }
-

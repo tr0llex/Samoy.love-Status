@@ -250,7 +250,7 @@ func (in *Inbox) Poll(st *State, now time.Time) []DeployEvent {
 		log.Printf("журнал событий не открыт (%s): %v", in.dir, err)
 		return nil
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 
 	var out []DeployEvent
 	taken := 0
@@ -359,7 +359,7 @@ func (in *Inbox) read(root *os.Root, name string, st *State, now time.Time) (Dep
 		log.Printf("событие %s не открыто: %v", name, err)
 		return DeployEvent{}, false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Файл мог подрасти между stat и open, поэтому читается на байт больше
 	// предела: чтение до конца при обмане в stat означало бы предел, которого

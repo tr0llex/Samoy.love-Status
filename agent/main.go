@@ -2087,7 +2087,7 @@ func readEvents(dir string, sinceMs int64, limit int) ([]deployEvent, int64) {
 		log.Printf("журнал выкаток не открыт (%s): %v", dir, err)
 		return nil, sinceMs
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 
 	cursor := sinceMs
 	taken := 0
@@ -2159,7 +2159,7 @@ func readEvent(root *os.Root, name string) (deployEvent, bool) {
 		log.Printf("событие %s не открыто: %v", name, err)
 		return deployEvent{}, false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Файл мог подрасти между stat и open, поэтому читается на байт больше
 	// предела: чтение до конца при обмане в stat означало бы предел, которого
