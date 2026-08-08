@@ -63,18 +63,13 @@ func TestFirstRunStaysSilentWhenHealthy(t *testing.T) {
 	if len(events) != 0 {
 		t.Fatalf("после старта не должно быть уведомлений о живых сервисах, пришло: %v", kinds(events))
 	}
-	// Версия запомнена молча — иначе перезапуск бота выглядел бы как релиз.
-	if st.Versions["snakes::Сервер и клиент"] != "v1" {
-		t.Error("версия не запомнена при первом наблюдении")
-	}
 }
 
 // Молчаливое изменение состояния тоже обязано попасть на диск.
 //
-// Версия при первом наблюдении запоминается без события. Пока файл писался
-// только при событии, перезапуск бота терял выученные версии: следующий старт
-// снова видел их впервые и снова молчал, а выкатка, попавшая в это окно,
-// до владельца не доезжала.
+// Живая цель при первом наблюдении запоминается без события. Пока файл
+// писался только при событии, такие записи не переживали перезапуск, и бот
+// заново проходил путь «вижу впервые» по всему, что и так знал.
 func TestSilentChangeMarksStateDirty(t *testing.T) {
 	st := newState()
 	s := summaryAt(base, "up", base.Add(-time.Hour), true, "v1")
@@ -84,7 +79,7 @@ func TestSilentChangeMarksStateDirty(t *testing.T) {
 		t.Fatalf("живые сервисы не должны уведомлять: %v", kinds(events))
 	}
 	if !st.dirty {
-		t.Fatal("версии запомнены, но состояние не помечено к записи — перезапуск их потеряет")
+		t.Fatal("цели запомнены, но состояние не помечено к записи — перезапуск их потеряет")
 	}
 
 	// Обратная сторона: повтор того же самого ничего не меняет, и переписывать
@@ -184,42 +179,27 @@ func TestReminderIntervalConfigurable(t *testing.T) {
 	}
 }
 
-func TestVersionChange(t *testing.T) {
+// Смена версии в summary.json больше не повод для сообщения.
+//
+// Здесь стоит охрана от возврата снесённой механики: разница двух соседних
+// снимков теряла три выкатки за минуту, выкатку с откатом внутри минуты,
+// провал и автооткат целиком. О релизе теперь говорит событие выкатки, а
+// опрос версий остаётся сырьём для проверки «версия без события» (D1).
+func TestСменаВерсииБольшеНеПорождаетРелиз(t *testing.T) {
 	st := newState()
 	st.Apply(summaryAt(base, "up", base, true, "20260802-120000-abc1234"), base, 15*time.Minute, 5*time.Minute)
 
 	next := base.Add(time.Minute)
 	events := st.Apply(summaryAt(next, "up", next, true, "20260802-120500-def5678"), next, 15*time.Minute, 5*time.Minute)
-	if len(events) != 1 || events[0].Kind != KindRelease {
-		t.Fatalf("смена версии не замечена: %v", kinds(events))
-	}
-	if events[0].Version != "20260802-120500-def5678" || events[0].Previous != "20260802-120000-abc1234" {
-		t.Errorf("в событии не те версии: %+v", events[0])
-	}
-	if !events[0].At.Equal(next) {
-		t.Errorf("время сборки %s, ожидали %s", events[0].At, next)
-	}
-
-	// Та же версия на следующем обходе — не событие.
-	after := next.Add(time.Minute)
-	if events := st.Apply(summaryAt(after, "up", next, true, "20260802-120500-def5678"), after, 15*time.Minute, 5*time.Minute); len(events) != 0 {
-		t.Fatalf("неизменная версия не должна уведомлять: %v", kinds(events))
-	}
-}
-
-func TestEmptyVersionIsNotRelease(t *testing.T) {
-	st := newState()
-	st.Apply(summaryAt(base, "up", base, true, "v1"), base, 15*time.Minute, 5*time.Minute)
-
-	// Сервис не ответил на /version.json — версия пустая. Это сбой сбора
-	// данных, а не откат: сообщать о нём релизом нельзя.
-	next := base.Add(time.Minute)
-	events := st.Apply(summaryAt(next, "up", next, true, ""), next, 15*time.Minute, 5*time.Minute)
 	if len(events) != 0 {
-		t.Fatalf("пустая версия не должна порождать событие: %v", kinds(events))
+		t.Fatalf("наблюдение снова объявляет релизы по разнице снимков: %v", kinds(events))
 	}
-	if st.Versions["snakes::Сервер и клиент"] != "v1" {
-		t.Error("известная версия затёрта пустой")
+
+	// И пустая версия (сервис не ответил на /version.json) тоже молчит: сбой
+	// сбора данных никогда не был откатом.
+	after := next.Add(time.Minute)
+	if events := st.Apply(summaryAt(after, "up", after, true, ""), after, 15*time.Minute, 5*time.Minute); len(events) != 0 {
+		t.Fatalf("пустая версия не должна порождать событие: %v", kinds(events))
 	}
 }
 
@@ -283,8 +263,28 @@ func TestBrokenStateFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := loadState(path)
-	if st.Items == nil || st.Versions == nil {
+	if st.Items == nil {
 		t.Fatal("из битого файла должно получиться пустое рабочее состояние")
+	}
+}
+
+// Состояние прошлой версии бота содержит ключ "versions". Разбор обязан его
+// пережить: падение на нём стоило бы курсоров журнала и истории падений, то
+// есть повторного шквала уведомлений на ровном месте.
+func TestСтароеСостояниеСоСнимкомВерсийЧитается(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	raw := `{"offset":7,"items":{"check:c":{"down":true,"since":"2026-08-02T12:00:00Z",` +
+		`"notified":"2026-08-02T12:00:00Z"}},"versions":{"snakes::Сервер":"v1"}}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := loadState(path)
+	if st.Offset != 7 {
+		t.Errorf("offset потерян на старом файле: %d", st.Offset)
+	}
+	if st.Items["check:c"] == nil || !st.Items["check:c"].Down {
+		t.Error("память о лежащей проверке потеряна — владелец получит дубль уведомления")
 	}
 }
 
@@ -398,76 +398,12 @@ func TestСобытияНесутСсылкуИПроект(t *testing.T) {
 		t.Fatal("о лежащем сервисе не сообщено")
 	}
 	for _, e := range events {
-		if e.Kind == KindRelease {
-			continue
-		}
 		if e.URL == "" {
 			t.Errorf("событие %s %s без ссылки", e.Kind, e.Key)
 		}
 		if e.Key != "data" && e.Project == "" {
 			t.Errorf("событие %s %s без проекта — кнопка не будет знать, куда вести", e.Kind, e.Key)
 		}
-	}
-}
-
-func TestСообщениеОРелизеВедётНаКомпонент(t *testing.T) {
-	st := newState()
-	first := summaryAt(base, "up", base, true, "v1")
-	first.Projects[0].Builds[0].URL = "https://snakes.samoy.love/version.json"
-	st.Apply(first, base, 15*time.Minute, 5*time.Minute)
-
-	second := summaryAt(base, "up", base, true, "v2")
-	second.Projects[0].Builds[0].URL = "https://snakes.samoy.love/version.json"
-	events := st.Apply(second, base, 15*time.Minute, 5*time.Minute)
-
-	var seen bool
-	for _, e := range events {
-		if e.Kind == KindRelease {
-			seen = true
-			if e.URL != "https://snakes.samoy.love/version.json" {
-				t.Errorf("релиз ведёт на %q, а не на обновившийся компонент", e.URL)
-			}
-		}
-	}
-	if !seen {
-		t.Fatal("смена версии не превратилась в событие")
-	}
-}
-
-func TestРелизНесётСписокИзменений(t *testing.T) {
-	// Список бот не составляет и составить не может: git-истории выкаченных
-	// проектов на сервере нет. Он приезжает вместе с версией — из
-	// version.json через summary.json, — и обязан доехать до уведомления.
-	withChangelog := func(at time.Time, version string, cl []string) *Summary {
-		s := summaryAt(at, "up", at, true, version)
-		s.Projects[0].Builds[0].Changelog = cl
-		return s
-	}
-	st := newState()
-	st.Apply(withChangelog(base, "v1", nil), base, 15*time.Minute, 5*time.Minute)
-
-	next := base.Add(time.Minute)
-	events := st.Apply(withChangelog(next, "v2", []string{"обновить nginx до 1.24"}),
-		next, 15*time.Minute, 5*time.Minute)
-	if len(events) != 1 || events[0].Kind != KindRelease {
-		t.Fatalf("смена версии не замечена: %v", kinds(events))
-	}
-	if len(events[0].Changelog) != 1 || events[0].Changelog[0] != "обновить nginx до 1.24" {
-		t.Errorf("список изменений не доехал до события: %+v", events[0].Changelog)
-	}
-	if !strings.Contains(formatEvent(events[0]), "• обновить nginx до 1.24") {
-		t.Errorf("список изменений не попал в сообщение:\n%s", formatEvent(events[0]))
-	}
-
-	// Выкатка, которая ничего не публикует, обязана дать прежнее сообщение:
-	// changelog — украшение, а не условие уведомления.
-	after := next.Add(time.Minute)
-	events = st.Apply(withChangelog(after, "v3", nil), after, 15*time.Minute, 5*time.Minute)
-	if len(events) != 1 || events[0].Kind != KindRelease {
-		t.Fatalf("релиз без списка изменений не замечен: %v", kinds(events))
-	}
-	if strings.Contains(formatEvent(events[0]), "Изменения") {
-		t.Errorf("блок изменений появился без данных:\n%s", formatEvent(events[0]))
 	}
 }
 

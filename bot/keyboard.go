@@ -18,12 +18,20 @@ import "strings"
 var (
 	statusPageURL = "https://status.samoy.love/"
 	miniApp       = "https://status.samoy.love/tg/"
+	// groupChat — отрицательный Owner (см. config.go) уже отличает группу от
+	// личной переписки для прав, но до этой правки то же число никак не
+	// влияло на openButton(). Telegram документирует web_app как «доступно
+	// только в личных чатах»: попытка отправить его в группе — это отказ
+	// sendMessage целиком, а не пропавшая кнопка, то есть немота бота во
+	// ВСЕХ клавиатурах разом (openButton стоит в navRows и alertKeyboard).
+	groupChat = false
 )
 
 // applyConfig задаёт адреса один раз при старте.
 func applyConfig(c Config) {
 	statusPageURL = c.StatusURL
 	miniApp = c.MiniApp
+	groupChat = c.Owner < 0
 }
 
 // Действия под уведомлением. Ночью нужна не навигация по экранам, а способ
@@ -82,10 +90,11 @@ func projectOfView(view string) (string, bool) {
 }
 
 // Кнопка мини-приложения работает только в личной переписке и только по
-// https. Если адрес почему-то не https, отдаём обычную ссылку — пусть
-// откроется в браузере, но кнопка не пропадёт.
+// https. Если адрес почему-то не https, или чат — группа, отдаём обычную
+// ссылку: пусть откроется в браузере, но кнопка не пропадёт, а сообщение с
+// ней не откажется отправляться целиком.
 func openButton() Button {
-	if strings.HasPrefix(miniApp, "https://") {
+	if !groupChat && strings.HasPrefix(miniApp, "https://") {
 		return Button{Text: "Открыть", WebApp: &WebApp{URL: miniApp}}
 	}
 	return Button{Text: "Открыть", URL: miniApp}

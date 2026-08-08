@@ -87,6 +87,23 @@ func TestКнопкаМиниПриложенияТребуетHTTPS(t *testing.
 	}
 }
 
+func TestКнопкаМиниПриложенияНеЛомаетГруппу(t *testing.T) {
+	// Telegram отклоняет web_app-кнопку вне личной переписки: sendMessage с
+	// ней в reply_markup отказывает целиком, а не молча теряет кнопку. Owner
+	// в конфиге уже отличает группу (id отрицательный) от личного чата — эта
+	// проверка обязана дойти и до клавиатуры, не только до прав владельца.
+	t.Cleanup(func() { applyConfig(Config{MiniApp: "https://status.samoy.love/tg/"}) })
+
+	applyConfig(Config{MiniApp: "https://status.samoy.love/tg/", Owner: 173418650})
+	if b := openButton(); b.WebApp == nil || b.URL != "" {
+		t.Errorf("в личном чате ожидали web_app, получили %+v", b)
+	}
+	applyConfig(Config{MiniApp: "https://status.samoy.love/tg/", Owner: -1001234567890})
+	if b := openButton(); b.WebApp != nil || b.URL == "" {
+		t.Errorf("в группе ожидали обычную ссылку вместо web_app, получили %+v", b)
+	}
+}
+
 func TestНеизвестнаяКнопкаНеЛомаетЭкран(t *testing.T) {
 	// Сообщение могло быть отправлено прошлой версией бота с другими кнопками.
 	if got := viewOf("несуществующая"); got != ViewStatus {

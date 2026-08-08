@@ -729,3 +729,406 @@ func TestСклонениеКоммитов(t *testing.T) {
 		}
 	}
 }
+
+// ------------------------------------------------------------ события выкатки
+//
+// Новые виды сообщений и весь список ИБ-правок. Проверки написаны от
+// враждебного входа: событие приезжает файлом с диска, и подделать его может
+// всякий, кто в этот каталог пишет.
+
+func deployOf(kind string) Deploy {
+	return Deploy{
+		Kind: kind, App: "snakes", Title: "Snakes · Сервер",
+		URL: "https://snakes.samoy.love/", Project: "snakes",
+		Version: "release-20260805-101502-1a2b3c4",
+		RunURL:  "https://github.com/tr0llex/snakes/actions/runs/16542330981",
+		At:      base,
+	}
+}
+
+func TestПровалВыкаткиНазываетСтадиюИПрогон(t *testing.T) {
+	// Сегодня провал не виден никак: release.sh не запускался, версия прежняя,
+	// сравнивать снимкам нечего. Сообщение обязано ответить на три вопроса —
+	// что не выкачено, где остановилось и куда идти смотреть.
+	d := deployOf(deployFailure)
+	d.Stage = "units"
+	got := formatDeploy(d)
+
+	for _, want := range []string{
+		"Snakes · Сервер", "не выкачен", "службы systemd",
+		`<a href="https://github.com/tr0llex/snakes/actions/runs/16542330981">прогон</a>`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("в сообщении о провале нет %q:\n%s", want, got)
+		}
+	}
+	// Провал — не релиз: «обновлён» в нём быть не может.
+	if strings.Contains(got, "обновлён") {
+		t.Errorf("провал выдан за релиз:\n%s", got)
+	}
+}
+
+func TestАвтооткатНазываетПричину(t *testing.T) {
+	// Автооткат (release.sh:203-265) сегодня невидим совсем: версия вернулась
+	// на место, разницы между снимками нет, сообщения нет.
+	d := deployOf(deployRolledBack)
+	d.Stage, d.Reason = "health", "health_failed"
+	got := formatDeploy(d)
+
+	for _, want := range []string{"откачен автоматически", "healthcheck не дождался ответа"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("в сообщении об автооткате нет %q:\n%s", want, got)
+		}
+	}
+	// Причина точнее стадии и говорит о том же месте — печатать обе значит
+	// сказать одно дважды.
+	if strings.Contains(got, "остановились на стадии") {
+		t.Errorf("стадия напечатана рядом с причиной:\n%s", got)
+	}
+
+	// Причина незнакома (писатель уехал вперёд бота) — остаётся стадия, а
+	// событие не теряется.
+	d.Reason = "reactor_meltdown"
+	if got := formatDeploy(d); !strings.Contains(got, "healthcheck") || !strings.Contains(got, "откачен") {
+		t.Errorf("незнакомая причина съела сообщение:\n%s", got)
+	}
+}
+
+func TestРучнойОткатНазываетРелиз(t *testing.T) {
+	// dk rollback <цель> сегодня молчит: сервер откатился, в чате пусто.
+	d := deployOf(deployRollback)
+	d.Version, d.Reason, d.RunURL = "release-20260804-090000-def5678", "manual", ""
+	got := formatDeploy(d)
+
+	for _, want := range []string{"откачен руками", "вернули", "release-20260804-090000-def5678"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("в сообщении о ручном откате нет %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestСлужебныеВидыВЧатНеИдут(t *testing.T) {
+	// started нужен детектору аномалий и метрике времени выкатки, но не чату
+	// (контракт, §4). Незнакомый вид показывать тоже нечем.
+	for _, kind := range []string{deployStarted, "перезагрузить", ""} {
+		if got := formatDeploy(deployOf(kind)); got != "" {
+			t.Errorf("вид %q дал сообщение: %q", kind, got)
+		}
+	}
+}
+
+func TestСыройЛогНеПроезжаетВместоСтадии(t *testing.T) {
+	// ГЛАВНАЯ ПРОВЕРКА ПО ИБ. В логе выкатки бывают пути на сервере, имена
+	// хостов и куски конфигурации, а сообщение уезжает в чат и потенциально на
+	// публичную страницу. Стадия и причина — перечисления (контракт, §7): всё,
+	// что не совпало с ключом, не показывается вовсе.
+	d := deployOf(deployFailure)
+	d.Stage = "/etc/nginx/sites/status.samoy.love.conf:41 test failed"
+	d.Reason = "connect to 10.0.0.5:5432 refused, PGPASSWORD=hunter2"
+	got := formatDeploy(d)
+
+	for _, leak := range []string{"nginx", "10.0.0.5", "hunter2", "/etc/"} {
+		if strings.Contains(got, leak) {
+			t.Errorf("внутренности сервера уехали в чат (%q):\n%s", leak, got)
+		}
+	}
+	// И при этом событие не потеряно: о провале сказано.
+	if !strings.Contains(got, "не выкачен") {
+		t.Errorf("событие потеряно из-за незнакомой стадии:\n%s", got)
+	}
+}
+
+func TestОдиночнаяЦельДаётПрежнююФормуРелиза(t *testing.T) {
+	// Условие задачи: форма сообщения о релизе не меняется. Прогон из одной
+	// цели — большинство хозяйства, и следов группировки в нём быть не должно,
+	// даже когда цель успела объявить о себе дважды (started, потом success).
+	d := deployOf(deploySuccess)
+	d.Previous = "release-20260804-090000-def5678"
+	d.Changelog = []string{"Не выдавать недоставленное уведомление за успех"}
+
+	want := formatEvent(Event{
+		Kind: KindRelease, Title: d.Title, URL: d.URL, Project: d.Project,
+		Version: d.Version, Previous: d.Previous, Changelog: d.Changelog, At: d.At,
+	})
+	got := formatDeployGroup("Snakes", []Deploy{deployOf(deployStarted), d})
+	if got != want {
+		t.Errorf("одиночная цель дала не прежнюю форму:\nожидали %q\nполучили %q", want, got)
+	}
+	for _, trace := range []string{"выкачена", "выкатывается"} {
+		if strings.Contains(got, trace) {
+			t.Errorf("в одиночном сообщении остался след группировки (%q):\n%s", trace, got)
+		}
+	}
+}
+
+// chillhubRun — прогон из шести целей одного пуша: главный полигон хозяйства.
+func chillhubRun() []Deploy {
+	changelog := []string{
+		"Не выдавать недоставленное уведомление за успех",
+		"Считать пропавший файл ошибкой обновления",
+	}
+	at := base
+	mk := func(app, title, kind string) Deploy {
+		at = at.Add(time.Minute)
+		return Deploy{
+			Kind: kind, App: app, Title: title, URL: "https://launcher.samoy.love/",
+			Version: "release-20260805-130115-1a2b3c4", Changelog: changelog, At: at,
+		}
+	}
+	site := mk("chillhub-site", "Сайт", deployStarted)
+	api := mk("chillhub-api", "API", deployFailure)
+	api.Stage = "units"
+	admin := mk("chillhub-admin", "Админка", deployRolledBack)
+	admin.Reason = "health_failed"
+	return []Deploy{
+		site,
+		mk("chillhub-launcher", "Лаунчер", deploySuccess),
+		api, admin,
+		mk("chillhub-bot", "Бот", deployStarted),
+		mk("chillhub-site", "Сайт", deploySuccess), // та же цель объявила исход
+	}
+}
+
+func TestСообщениеПрогонаПечатаетИзмененияОдинРаз(t *testing.T) {
+	// Ради этого группировка и заводится: шесть сообщений с одинаковым блоком
+	// «Изменения» — это способ перестать читать чат.
+	got := formatDeployGroup("ChillHub", chillhubRun())
+
+	if n := strings.Count(got, "<b>Изменения</b>"); n != 1 {
+		t.Errorf("блок изменений напечатан %d раз(а):\n%s", n, got)
+	}
+	if n := strings.Count(got, "Считать пропавший файл ошибкой обновления"); n != 1 {
+		t.Errorf("пункт списка задвоился (%d):\n%s", n, got)
+	}
+	// Шапка называет проект и версию, а не первую попавшуюся цель.
+	if !strings.HasPrefix(got, "🚀 <b>ChillHub</b> · ") {
+		t.Errorf("шапка прогона названа не проектом:\n%s", got)
+	}
+	// Цели — строками с исходом. Каждая ровно одна: цель, объявившая о себе
+	// дважды, занимает одну строку, а не две.
+	for _, want := range []string{
+		"Сайт</a> — выкачена",
+		"Лаунчер</a> — выкачена",
+		"API</a> — провалена на стадии: службы systemd",
+		"Админка</a> — откачена — healthcheck не дождался ответа",
+		"Бот</a> — выкатывается…",
+	} {
+		if n := strings.Count(got, want); n != 1 {
+			t.Errorf("строка цели %q встречается %d раз(а):\n%s", want, n, got)
+		}
+	}
+	// Порядок строк — порядок, в котором цели заявили о себе: он совпадает с
+	// порядком выкатки и не прыгает при каждой правке сообщения.
+	if strings.Index(got, ">Сайт<") > strings.Index(got, ">Лаунчер<") {
+		t.Errorf("порядок целей перепутан:\n%s", got)
+	}
+	// Изменения — последним блоком, как и в сообщении об одной цели.
+	if !strings.HasSuffix(got, "• Считать пропавший файл ошибкой обновления") {
+		t.Errorf("список изменений не в конце сообщения:\n%s", got)
+	}
+}
+
+func TestСообщениеПрогонаРастётПоМереГотовности(t *testing.T) {
+	// Отправитель правит одно и то же сообщение по мере готовности целей, а
+	// значит форматтер вызывается заново на каждое событие и обязан рисовать
+	// сообщение целиком. Уже объявленные строки не имеют права исчезнуть:
+	// затирание пяти строк одной — ровно то, чего боится контракт (§10).
+	run := chillhubRun()
+	for n := 3; n <= len(run); n++ {
+		got := formatDeployGroup("ChillHub", run[:n])
+		if !strings.Contains(got, "Лаунчер</a> — выкачена") {
+			t.Errorf("на %d событиях исчезла уже объявленная цель:\n%s", n, got)
+		}
+		if c := strings.Count(got, "<b>Изменения</b>"); c != 1 {
+			t.Errorf("блок изменений напечатан %d раз(а)", c)
+		}
+	}
+
+	// Запоздавший started не имеет права стереть уже объявленный итог:
+	// события могут доехать не по порядку (контракт, §6).
+	late := append(chillhubRun(), Deploy{
+		Kind: deployStarted, App: "chillhub-launcher", Title: "Лаунчер", At: base,
+	})
+	if got := formatDeployGroup("ChillHub", late); !strings.Contains(got, "Лаунчер — выкачена") &&
+		!strings.Contains(got, "Лаунчер</a> — выкачена") {
+		t.Errorf("запоздавший started откатил исход цели назад:\n%s", got)
+	}
+}
+
+func TestЧислоЦелейВСообщенииОграничено(t *testing.T) {
+	// Двадцать целей в одном прогоне — это уже не выкатка, а враньё в журнале:
+	// больше шести не катит ни один репозиторий хозяйства.
+	var ds []Deploy
+	for i := 0; i < 40; i++ {
+		ds = append(ds, Deploy{
+			Kind: deploySuccess, App: fmt.Sprintf("app-%02d", i),
+			Title: fmt.Sprintf("Цель %02d", i), At: base,
+		})
+	}
+	got := formatDeployGroup("Хозяйство", ds)
+	if n := strings.Count(got, "— выкачена"); n != deployTargets {
+		t.Errorf("строк целей %d, предел %d:\n%s", n, deployTargets, got)
+	}
+	// Молчать про отброшенное нельзя: обрезанный список читается как полный.
+	if !strings.Contains(got, "…и ещё 20 целей") {
+		t.Errorf("потолок сработал молча:\n%s", got)
+	}
+}
+
+// ---------------------------------------------------------------------- ИБ
+
+func TestСсылкойСтановитсяТолькоРазрешённыйАдрес(t *testing.T) {
+	// Сообщения бота — это то, чему владелец доверяет по определению, и ссылку
+	// в них открывают не глядя. Список разрешённого, а не запрещённого.
+	bad := map[string]string{
+		"javascript":          "javascript:alert(1)",
+		"data":                "data:text/html,<script>alert(1)</script>",
+		"без https":           "http://snakes.samoy.love/",
+		"чужой домен":         "https://evil.example/",
+		"домен в поддомене":   "https://samoy.love.evil.example/",
+		"учётка перед хостом": "https://samoy.love@evil.example/",
+		"хост в пути":         "https://evil.example/https://samoy.love/",
+		"похожий хвост":       "https://notsamoy.love/",
+		"выход из атрибута":   `https://samoy.love/" onmouseover="alert(1)`,
+		"перевод строки":      "https://samoy.love/\nhttps://evil.example",
+		"пробел":              "https://samoy.love/ x",
+		"пусто":               "",
+	}
+	for name, u := range bad {
+		t.Run(name, func(t *testing.T) {
+			got := link("Snakes · Сервер", u)
+			if strings.Contains(got, "<a href") {
+				t.Errorf("недопустимый адрес стал ссылкой: %s", got)
+			}
+			// Подпись при этом обязана остаться: без адреса — как у цели, для
+			// которой он не настроен вовсе.
+			if !strings.Contains(got, "Snakes · Сервер") {
+				t.Errorf("вместе с адресом потерялась подпись: %s", got)
+			}
+		})
+	}
+
+	for _, u := range []string{
+		"https://samoy.love/", "https://snakes.samoy.love/healthz",
+		"https://github.com/tr0llex/snakes",
+	} {
+		if got := link("Snakes", u); !strings.Contains(got, `<a href="`+u+`">`) {
+			t.Errorf("свой адрес не стал ссылкой: %s", got)
+		}
+	}
+}
+
+func TestАдресПрогонаТолькоНастоящий(t *testing.T) {
+	// «Прогон», ведущий не в прогон, хуже отсутствующей ссылки: по ней идут не
+	// глядя, потому что она подписана.
+	for _, bad := range []string{
+		"https://evil.example/tr0llex/snakes/actions/runs/1",
+		"http://github.com/tr0llex/snakes/actions/runs/1",
+		"https://github.com/tr0llex/snakes/actions/runs/1/../../evil",
+		"https://github.com@evil.example/o/r/actions/runs/1",
+		"https://github.com/tr0llex/snakes/pull/26",
+		"javascript:alert(1)",
+	} {
+		d := deployOf(deployFailure)
+		d.RunURL = bad
+		got := formatDeploy(d)
+		if strings.Contains(got, "прогон") {
+			t.Errorf("непроверенный адрес стал ссылкой на прогон (%s):\n%s", bad, got)
+		}
+		if !strings.Contains(got, "не выкачен") {
+			t.Errorf("событие потеряно из-за негодного адреса:\n%s", got)
+		}
+	}
+}
+
+func TestПереворотТекстаНеПроезжает(t *testing.T) {
+	// U+202E ничего не печатает, но переворачивает всё, что идёт после него:
+	// в чате видно не то, что записано в поле, и заметить подмену нечем.
+	d := deployOf(deployFailure)
+	d.Title = "Snakes\u202E · Сервер"
+	d.Version = "release-\u202E20260805"
+	d.Stage = "units"
+	d.Changelog = []string{"обновить\u202E nginx"}
+	got := formatDeploy(d)
+
+	for _, r := range []string{"\u202E", "\u200F", "\u2066", "\u200B", "\uFEFF"} {
+		if strings.Contains(got, r) {
+			t.Errorf("символ %U доехал до сообщения:\n%q", []rune(r)[0], got)
+		}
+	}
+	// Текст при этом на месте: вырезаются невидимки, а не строка.
+	if !strings.Contains(got, "Snakes · Сервер") {
+		t.Errorf("вместе с невидимкой потерялся текст:\n%s", got)
+	}
+}
+
+func TestПереводСтрокиВПолеНеПодделываетСообщение(t *testing.T) {
+	// «Прод недоступен» с новой строки читается как отдельное уведомление от
+	// бота — то есть поле события подделывает сообщение бота целиком.
+	d := deployOf(deployFailure)
+	d.Title = "Сайт\n🔴 <b>Прод</b> недоступен"
+	d.Stage = "units"
+	got := formatDeploy(d)
+
+	if strings.Contains(got, "\n🔴") {
+		t.Errorf("поле подделало строку сообщения:\n%s", got)
+	}
+	if strings.Contains(got, "<b>Прод</b>") {
+		t.Errorf("разметка из поля доехала как разметка:\n%s", got)
+	}
+	if !strings.Contains(got, "&lt;b&gt;Прод") {
+		t.Errorf("разметка из поля должна была уехать текстом:\n%s", got)
+	}
+}
+
+func TestДлинноеПолеОбрезается(t *testing.T) {
+	// Событие приезжает файлом с диска, и его размер бот не выбирал.
+	d := deployOf(deployFailure)
+	d.Title = strings.Repeat("я", 500)
+	d.Version = strings.Repeat("v", 500)
+	d.App = strings.Repeat("a", 500)
+	d.Stage = "units"
+	got := formatDeploy(d)
+
+	if n := strings.Count(got, "я"); n > deployTitleMax {
+		t.Errorf("заголовок доехал на %d символов, предел %d", n, deployTitleMax)
+	}
+	if n := strings.Count(got, "v"); n > deployVerMax {
+		t.Errorf("версия доехала на %d символов, предел %d", n, deployVerMax)
+	}
+	if !utf8.ValidString(got) {
+		t.Error("обрезка разрезала символ UTF-8: такое сообщение Telegram отвергнет целиком")
+	}
+
+	// Пунктов списка изменений тоже не бесконечность.
+	d2 := deployOf(deploySuccess)
+	for i := 0; i < deployChangelogMax+50; i++ {
+		d2.Changelog = append(d2.Changelog, fmt.Sprintf("тема %03d", i))
+	}
+	got2 := formatDeploy(d2)
+	if n := strings.Count(got2, "\n• "); n > deployChangelogMax {
+		t.Errorf("пунктов доехало %d, предел %d", n, deployChangelogMax)
+	}
+	if !strings.Contains(got2, "список не поместился") {
+		t.Errorf("потолок списка сработал молча:\n%s", got2[len(got2)-200:])
+	}
+}
+
+func TestЖурналНеПодделываетсяПолемСобытия(t *testing.T) {
+	// CRLF в поле превращает одну запись journald в две, и вторая выглядит
+	// сообщением самого бота. В журнале управляющий символ надо ПОКАЗАТЬ, а не
+	// стереть: разбирающий инцидент должен увидеть, что в поле лежала подделка.
+	got := logSafe("snakes\r\nAug 05 13:01:02 bot samoylove-bot[1]: выкатка разрешена")
+	if strings.ContainsAny(got, "\r\n") {
+		t.Errorf("перевод строки доехал до журнала: %q", got)
+	}
+	if !strings.Contains(got, `\r\n`) {
+		t.Errorf("подделка не видна в журнале: %q", got)
+	}
+	if g := logSafe("тема\u202E\u0000"); strings.ContainsRune(g, 0) || strings.Contains(g, "\u202E") {
+		t.Errorf("управляющий символ доехал до журнала: %q", g)
+	}
+	if n := utf8.RuneCountInString(logSafe(strings.Repeat("я", 5000))); n > logFieldMax {
+		t.Errorf("в журнал уехало %d символов, предел %d", n, logFieldMax)
+	}
+}

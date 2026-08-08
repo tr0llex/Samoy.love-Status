@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -33,9 +34,30 @@ type Config struct {
 	State     string
 	Metrics   string
 
+	// EventsDir — журнал выкаток, который пишет deploy-kit
+	// (deploy-kit/docs/events.md, §1). Пустая строка означает «журнал не
+	// читать»: старый путь (релиз по разнице версий) продолжает работать сам
+	// по себе, и снять новый можно одной строкой в файле окружения, не
+	// выкатывая бота. Пока новый путь не отстоял несколько настоящих выкаток,
+	// это единственная страховка, и стоит она ноль.
+	EventsDir string
+	// Groups — где лежит память о сообщениях прогонов: group → message_id и
+	// исходы уже объявленных целей (контракт, §10).
+	//
+	// Отдельным файлом рядом с state.json, а НЕ полем State: структура State
+	// живёт в watch.go, и добавлять туда поле посреди волны, когда файл правят
+	// другие, значило бы потерять либо своё, либо чужое. Каталог тот же
+	// (ReadWritePaths юнита), запись такая же атомарная. Слить обратно в
+	// state.json — правка на одно поле, и её место — watch.go.
+	Groups string
+
 	Remind time.Duration
 	Watch  time.Duration
 	Stale  time.Duration
+	// Events — как часто перечитывается журнал выкаток. Секунда, а не минута:
+	// мгновенность и есть то единственное, ради чего событие заводилось вместо
+	// наблюдения. Тик стоит один readdir по каталогу с десятком файлов.
+	Events time.Duration
 
 	MiniApp   string
 	StatusURL string
@@ -73,12 +95,29 @@ func loadConfig() (Config, error) {
 		DataDir:   envStr("DATA_DIR", "/var/www/status/data"),
 		State:     envStr("STATE_FILE", "/var/lib/samoylove-bot/state.json"),
 		Metrics:   envStr("METRICS_FILE", defaultBotMetricsPath),
+		EventsDir: envStr("EVENTS_DIR", defaultEventsDir),
 		Remind:    envDuration("REMIND_INTERVAL", 15*time.Minute),
 		Watch:     envDuration("WATCH_INTERVAL", 30*time.Second),
 		Stale:     envDuration("STALE_AFTER", 5*time.Minute),
+		Events:    envDuration("EVENTS_INTERVAL", inboxInterval),
 		MiniApp:   envStr("MINIAPP_URL", "https://status.samoy.love/tg/"),
 		StatusURL: envStr("STATUS_URL", "https://status.samoy.love/"),
 	}
+	// «off» — явное выключение чтения журнала. Отдельное слово, а не пустая
+	// строка: пустое значение переменной в файле окружения чаще всего означает
+	// «забыли дописать», и молча выключать по нему уведомления о выкатках
+	// нельзя — тишина в чате читается как «не катились».
+	if c.EventsDir == "off" || c.EventsDir == "-" {
+		c.EventsDir = ""
+	}
+	c.Groups = envStr("GROUPS_FILE", filepath.Join(filepath.Dir(c.State), "deploy-groups.json"))
+	// Ноль и отрицательное значение — не «читать без пауз», а опечатка:
+	// time.NewTicker на таком просто паникует, и бот не пережил бы старта.
+	if c.Events <= 0 {
+		log.Printf("EVENTS_INTERVAL=%s не годится для тика, беру %s", c.Events, inboxInterval)
+		c.Events = inboxInterval
+	}
+
 	if c.Token == "" {
 		return c, fmt.Errorf("нет TELEGRAM_BOT_TOKEN: положите его в файл окружения службы")
 	}
