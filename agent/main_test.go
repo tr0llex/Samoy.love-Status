@@ -355,57 +355,108 @@ func contains(haystack, needle string) bool {
 	})()
 }
 
-func TestRecordReleaseAppendsOnlyOnChange(t *testing.T) {
+// ------------------------------------------------------- история из событий
+
+// testEvent — событие выкатки для тестов. id получается из номера, чтобы в
+// тексте теста было видно, где повтор доставки, а где новая выкатка.
+func testEvent(n int, kind, app, version string) deployEvent {
+	return deployEvent{
+		File:    fmt.Sprintf("178592410%04d-%s-%s.json", n, app, kind),
+		ID:      strings.Repeat(fmt.Sprintf("%x", n%16), 64),
+		Kind:    kind,
+		App:     app,
+		At:      "2026-08-02T10:00:00Z",
+		Version: version,
+	}
+}
+
+func TestТриВыкаткиЗаМинутуДаютТриЗаписи(t *testing.T) {
+	// То, ради чего история переехала на события: разница двух снимков
+	// /version.json оставляла от трёх выкаток одну запись, а две промежуточные
+	// версии не существовали ни для чата, ни для истории.
 	now := time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC)
 	var h []Release
-
-	h = recordRelease(h, OutBuild{Version: "v1", At: "2026-08-01T00:00:00Z"}, now)
-	if len(h) != 1 {
-		t.Fatalf("первая версия должна попасть в историю, получили %d записей", len(h))
+	for i, v := range []string{"v1", "v2", "v3"} {
+		h = applyEvent(h, testEvent(i+1, evSuccess, "snakes", v), now.Add(time.Duration(i)*time.Second))
 	}
-	if h[0].Seen != now.Format(time.RFC3339) {
-		t.Errorf("момент обнаружения версии не записан: %+v", h[0])
-	}
-
-	// Тот же самый релиз проверяется раз в минуту — плодить записи нельзя.
-	h = recordRelease(h, OutBuild{Version: "v1", At: "2026-08-01T00:00:00Z"}, now.Add(time.Minute))
-	if len(h) != 1 {
-		t.Fatalf("неизменная версия не должна дублироваться, получили %d записей", len(h))
-	}
-
-	h = recordRelease(h, OutBuild{Version: "v2"}, now.Add(time.Hour))
-	if len(h) != 2 || h[0].Version != "v2" {
-		t.Fatalf("новая версия должна встать первой, получили %+v", h)
-	}
-}
-
-func TestRecordReleaseKeepsRollback(t *testing.T) {
-	// Откат на предыдущую версию — это тоже выкатка. Если сравнивать со всем
-	// списком, а не только с последней записью, откат исчезнет из истории.
-	now := time.Now().UTC()
-	var h []Release
-	h = recordRelease(h, OutBuild{Version: "v1"}, now)
-	h = recordRelease(h, OutBuild{Version: "v2"}, now.Add(time.Minute))
-	h = recordRelease(h, OutBuild{Version: "v1"}, now.Add(2*time.Minute))
 
 	if len(h) != 3 {
-		t.Fatalf("откат должен попасть в историю отдельной записью, получили %d", len(h))
+		t.Fatalf("трём выкаткам положено три записи, получили %d: %+v", len(h), h)
 	}
-	if h[0].Version != "v1" || h[1].Version != "v2" {
+	if h[0].Version != "v3" || h[2].Version != "v1" {
 		t.Errorf("порядок истории нарушен: %+v", h)
+	}
+	if h[0].Seen == "" || h[0].At != "2026-08-02T10:00:00Z" {
+		t.Errorf("запись без времени выкатки или без момента записи: %+v", h[0])
 	}
 }
 
-func TestRecordReleaseIgnoresEmptyVersionAndTrims(t *testing.T) {
+func TestПовторДоставкиНеДаётВторойЗаписи(t *testing.T) {
+	// Доставка повторяется по построению: три попытки транспорта, повтор
+	// прогона одной кнопкой. Отличить повтор можно ТОЛЬКО по id — имена файлов
+	// у него разные, и курсор здесь не помогает никак.
 	now := time.Now().UTC()
-	// Сервис не отдал version.json — писать в историю нечего.
-	if got := recordRelease(nil, OutBuild{Title: "Сайт"}, now); got != nil {
-		t.Errorf("пустая версия не должна попадать в историю, получили %+v", got)
+	ev := testEvent(1, evSuccess, "snakes", "v1")
+	h := applyEvent(nil, ev, now)
+
+	again := ev
+	again.File = "1785924109999-snakes-success.json"
+	h = applyEvent(h, again, now.Add(time.Minute))
+
+	if len(h) != 1 {
+		t.Fatalf("повтор доставки завёл вторую запись: %+v", h)
+	}
+}
+
+func TestОднаВерсияДваждыОстаётсяДвумяВыкатками(t *testing.T) {
+	// Перевыкатка того же коммита и повтор прогона после починки
+	// инфраструктуры несут одну версию, но это ДВЕ выкатки. Схлопнув их по
+	// версии, мы потеряли бы настоящую — то самое, ради чего события заводились.
+	now := time.Now().UTC()
+	h := applyEvent(nil, testEvent(1, evSuccess, "snakes", "v1"), now)
+	h = applyEvent(h, testEvent(2, evSuccess, "snakes", "v1"), now.Add(time.Hour))
+
+	if len(h) != 2 {
+		t.Fatalf("две выкатки одной версии схлопнулись в одну запись: %+v", h)
+	}
+}
+
+func TestРучнойОткатПопадаетВИсториюАвтооткатНет(t *testing.T) {
+	now := time.Now().UTC()
+	h := applyEvent(nil, testEvent(1, evSuccess, "snakes", "v2"), now)
+
+	// Автооткат несёт версию, которую выкатывали и СНЯЛИ: на проде её не было
+	// ни минуты, и записывать её как релиз значило бы врать в истории.
+	h = applyEvent(h, testEvent(2, evRolledBack, "snakes", "v3"), now.Add(time.Minute))
+	if len(h) != 1 {
+		t.Fatalf("автооткат записан релизом: %+v", h)
 	}
 
+	// Ручной откат — наоборот: version в нём это релиз, НА который вернулись,
+	// и он на проде работает.
+	h = applyEvent(h, testEvent(3, evRollback, "snakes", "v1"), now.Add(2*time.Minute))
+	if len(h) != 2 || h[0].Version != "v1" {
+		t.Fatalf("возврат на прежний релиз не попал в историю: %+v", h)
+	}
+
+	// Провал и начало выкатки истории не касаются: на проде не появилось
+	// ничего нового, рассказывать о них — работа бота, а не журнала релизов.
+	h = applyEvent(h, testEvent(4, "failure", "snakes", "v4"), now.Add(3*time.Minute))
+	h = applyEvent(h, testEvent(5, "started", "snakes", "v4"), now.Add(4*time.Minute))
+	if len(h) != 2 {
+		t.Fatalf("провал или начало выкатки попали в историю: %+v", h)
+	}
+}
+
+func TestИсторияИзСобытийОбрезаетсяДоПредела(t *testing.T) {
+	now := time.Now().UTC()
 	var h []Release
 	for i := 0; i < releasesKeep+5; i++ {
-		h = recordRelease(h, OutBuild{Version: fmt.Sprintf("v%d", i)}, now.Add(time.Duration(i)*time.Minute))
+		ev := testEvent(i, evSuccess, "snakes", fmt.Sprintf("v%d", i))
+		// id обязан быть разным: иначе сработает дедупликация, а проверяем
+		// здесь другое.
+		ev.ID = fmt.Sprintf("%064x", i)
+		h = applyEvent(h, ev, now.Add(time.Duration(i)*time.Minute))
 	}
 	if len(h) != releasesKeep {
 		t.Fatalf("история обрезается до %d записей, получили %d", releasesKeep, len(h))
@@ -573,20 +624,21 @@ func TestCutRunesСчитаетСимволыИНеРежетИх(t *testing.T) 
 
 // --------------------------------------- список изменений в истории выкаток
 
-func TestRecordReleaseХранитСписокИзменений(t *testing.T) {
+func TestИсторияХранитСписокИзмененийСобытия(t *testing.T) {
 	// В summary.json changelog есть только у текущей версии. Вопрос «что было
 	// в релизе X» задают про прошлые — отвечать на него нечем, если список не
 	// осел в истории вместе с самой записью о выкатке.
 	now := time.Now().UTC()
-	h := recordRelease(nil, OutBuild{
-		Version:   "v1",
-		Changelog: []string{"поднять go до 1.22", "обновить nginx"},
-	}, now)
+	first := testEvent(1, evSuccess, "snakes", "v1")
+	first.Changelog = []string{"поднять go до 1.22", "обновить nginx"}
+	h := applyEvent(nil, first, now)
 
 	if len(h) != 1 || len(h[0].Changelog) != 2 {
 		t.Fatalf("список изменений не осел в истории: %+v", h)
 	}
-	h = recordRelease(h, OutBuild{Version: "v2", Changelog: []string{"починить логин"}}, now.Add(time.Hour))
+	second := testEvent(2, evSuccess, "snakes", "v2")
+	second.Changelog = []string{"починить логин"}
+	h = applyEvent(h, second, now.Add(time.Hour))
 	if len(h) != 2 {
 		t.Fatalf("новая версия не попала в историю: %+v", h)
 	}
@@ -599,43 +651,18 @@ func TestRecordReleaseХранитСписокИзменений(t *testing.T) {
 	}
 }
 
-func TestRecordReleaseДописываетСписокВГотовуюЗапись(t *testing.T) {
-	// releases.json старого формата уже содержит запись о текущей версии, но
-	// без списка. Ждать следующей выкатки, чтобы история начала заполняться,
-	// незачем — дописываем в пустое место.
-	now := time.Now().UTC()
-	h := []Release{{Version: "v1", Seen: "2026-08-01T00:00:00Z"}}
-	h = recordRelease(h, OutBuild{Version: "v1", Changelog: []string{"обновить nginx"}}, now)
-
-	if len(h) != 1 {
-		t.Fatalf("та же версия не должна плодить записи: %+v", h)
-	}
-	if len(h[0].Changelog) != 1 || h[0].Changelog[0] != "обновить nginx" {
-		t.Errorf("список не дописан в готовую запись: %+v", h[0])
-	}
-	if h[0].Seen != "2026-08-01T00:00:00Z" {
-		t.Errorf("момент обнаружения версии переписан: %+v", h[0])
-	}
-
-	// А непустой список затирать нечем: version.json могли перезаписать без
-	// поля, но история — это то, что было, а не то, что видно сейчас.
-	h = recordRelease(h, OutBuild{Version: "v1"}, now.Add(time.Minute))
-	if len(h[0].Changelog) != 1 {
-		t.Errorf("сохранённый список затёрт пустым: %+v", h[0])
-	}
-}
-
 func TestTrimReleaseChangelogsДержитФайлВБерегах(t *testing.T) {
 	// Файл переписывается раз в минуту и лежит в вебруте. Растёт он прежде
 	// всего вширь по истории, поэтому предел проверяем на длинной истории.
 	var h []Release
 	now := time.Now().UTC()
 	for i := 0; i < releasesKeep+5; i++ {
-		var cl []string
+		ev := testEvent(i, evSuccess, "snakes", fmt.Sprintf("v%d", i))
+		ev.ID = fmt.Sprintf("%064x", i)
 		for j := 0; j < 40; j++ {
-			cl = append(cl, strings.Repeat("тема ", 200))
+			ev.Changelog = append(ev.Changelog, strings.Repeat("тема ", 200))
 		}
-		h = recordRelease(h, OutBuild{Version: fmt.Sprintf("v%d", i), Changelog: cl}, now.Add(time.Duration(i)*time.Minute))
+		h = applyEvent(h, ev, now.Add(time.Duration(i)*time.Minute))
 	}
 
 	if len(h) != releasesKeep {
@@ -788,11 +815,10 @@ func TestReleasesJSONСтарыйФорматЧитается(t *testing.T) {
 func TestReleasesJSONНовыйФорматПереживаетКругЧерезДиск(t *testing.T) {
 	now := time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC)
 	releases := map[string][]Release{}
-	releases["samoy::Сайт"] = recordRelease(releases["samoy::Сайт"], OutBuild{
-		Version:   "v2",
-		At:        "2026-08-02T01:00:00Z",
-		Changelog: []string{"поднять go до 1.22 <-- важно", "обновить nginx"},
-	}, now)
+	ev := testEvent(1, evSuccess, "samoylove", "v2")
+	ev.At = "2026-08-02T01:00:00Z"
+	ev.Changelog = []string{"поднять go до 1.22 <-- важно", "обновить nginx"}
+	releases["samoy::Сайт"] = applyEvent(releases["samoy::Сайт"], ev, now)
 
 	path := filepath.Join(t.TempDir(), "releases.json")
 	if err := writeJSON(path, releases); err != nil {
@@ -844,5 +870,316 @@ func TestReleasesJSONПереживаетЧужойФорматСписка(t *t
 		if len(h[0].Changelog) != want {
 			t.Errorf("%s: разобрано %d пунктов, ожидали %d: %q", body, len(h[0].Changelog), want, h[0].Changelog)
 		}
+	}
+}
+
+// -------------------------------------------------- чтение журнала выкаток
+
+// writeEventFile кладёт в каталог файл журнала. Тело — как его пишет выкатка,
+// то есть по контракту deploy-kit/docs/events.md.
+func writeEventFile(t *testing.T, dir string, ms int64, app, kind string, body map[string]any) string {
+	t.Helper()
+	name := fmt.Sprintf("%013d-%s-%s.json", ms, app, kind)
+	b, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), b, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	return name
+}
+
+// eventBody — минимальное правильное событие по контракту.
+func eventBody(app, kind, version string) map[string]any {
+	return map[string]any{
+		"v":        1,
+		"id":       strings.Repeat("a", 64),
+		"kind":     kind,
+		"app":      app,
+		"at":       "2026-08-05T10:01:42Z",
+		"source":   "ci",
+		"group":    strings.Repeat("b", 64),
+		"groupSeq": 1,
+		"version":  version,
+	}
+}
+
+func TestЖурналСобытийЧитаетсяПоКурсору(t *testing.T) {
+	dir := t.TempDir()
+	writeEventFile(t, dir, 1785924102000, "snakes", "success", eventBody("snakes", "success", "v1"))
+	second := eventBody("snakes", "success", "v2")
+	second["id"] = strings.Repeat("c", 64)
+	writeEventFile(t, dir, 1785924103000, "snakes", "success", second)
+
+	// Курсора нет: журнал считается прочитанным, иначе в историю уехали бы две
+	// недели выкаток, о которых записи уже есть.
+	got, cursor := readEvents(dir, 0, eventsMaxPerRun)
+	if len(got) != 0 {
+		t.Fatalf("первый запуск разобрал журнал целиком: %+v", got)
+	}
+	if cursor != 1785924103000 {
+		t.Fatalf("курсор после первого запуска %d", cursor)
+	}
+
+	// А дальше — всё, что не старше курсора: события той же миллисекунды у
+	// другой цели иначе потерялись бы навсегда.
+	got, cursor = readEvents(dir, 1785924102000, eventsMaxPerRun)
+	if len(got) != 2 {
+		t.Fatalf("прочитано %d событий: %+v", len(got), got)
+	}
+	if got[0].Version != "v1" || got[1].Version != "v2" {
+		t.Errorf("порядок событий нарушен: %+v", got)
+	}
+	if cursor != 1785924103000 {
+		t.Errorf("курсор не доехал до последнего файла: %d", cursor)
+	}
+
+	got, _ = readEvents(dir, 1785924103001, eventsMaxPerRun)
+	if len(got) != 0 {
+		t.Errorf("прочитано лишнее после курсора: %+v", got)
+	}
+}
+
+func TestЖурналСобытийНеПадаетНаМусоре(t *testing.T) {
+	dir := t.TempDir()
+
+	// Имя не по шаблону — файла для читателя не существует.
+	if err := os.WriteFile(filepath.Join(dir, "1785924102000-snakes-success.json.tmp"),
+		[]byte(`{"v":1}`), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "события.json"), []byte(`{"v":1}`), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	// Обрезанный файл: если писателю однажды заменят rename на cp, читатель
+	// обязан это пережить.
+	if err := os.WriteFile(filepath.Join(dir, "1785924102100-snakes-success.json"),
+		[]byte(`{"v":1,"id":"aaa`), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	// Не та версия схемы.
+	future := eventBody("snakes", "success", "v9")
+	future["v"] = 2
+	writeEventFile(t, dir, 1785924102200, "snakes", "success", future)
+	// Имя файла не совпадает с содержимым: по имени считается порядок, и
+	// разъехавшись, они сломали бы курсор.
+	writeEventFile(t, dir, 1785924102300, "snakes", "success", eventBody("metro", "success", "v9"))
+	// id не sha256.
+	badID := eventBody("snakes", "success", "v9")
+	badID["id"] = "нет"
+	writeEventFile(t, dir, 1785924102400, "snakes", "success", badID)
+	// Версия не из разрешённого алфавита: она уезжает на публичную страницу.
+	writeEventFile(t, dir, 1785924102500, "snakes", "success", eventBody("snakes", "success", "../../etc/passwd"))
+	// Файл сверх предела: размер смотрится stat'ом до чтения.
+	huge := eventBody("snakes", "success", "v9")
+	huge["changelog"] = []string{strings.Repeat("я", 8<<10)}
+	writeEventFile(t, dir, 1785924102600, "snakes", "success", huge)
+	// И одно годное событие последним.
+	good := eventBody("snakes", "success", "v1")
+	good["id"] = strings.Repeat("d", 64)
+	writeEventFile(t, dir, 1785924102700, "snakes", "success", good)
+
+	got, cursor := readEvents(dir, 1785924102000, eventsMaxPerRun)
+	if len(got) != 1 || got[0].Version != "v1" {
+		t.Fatalf("мусор проехал в историю или утащил с собой годное событие: %+v", got)
+	}
+	// Курсор двигается и на пропущенных файлах: одна опечатка писателя не имеет
+	// права остановить историю навсегда.
+	if cursor != 1785924102700 {
+		t.Errorf("курсор застрял на %d", cursor)
+	}
+}
+
+func TestСимлинкВЖурналеНеЧитается(t *testing.T) {
+	dir := t.TempDir()
+	secret := filepath.Join(t.TempDir(), "secret.json")
+	b, _ := json.Marshal(eventBody("snakes", "success", "v9"))
+	if err := os.WriteFile(secret, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "1785924102000-snakes-success.json")
+	if err := os.Symlink(secret, link); err != nil {
+		// На Windows создание ссылки требует прав, которых у обычного
+		// пользователя нет. Молча признавать тест пройденным нельзя.
+		t.Skipf("симлинк не создан: %v", err)
+	}
+	good := eventBody("metro", "success", "v1")
+	good["id"] = strings.Repeat("e", 64)
+	writeEventFile(t, dir, 1785924102500, "metro", "success", good)
+
+	got, _ := readEvents(dir, 1785924102000, eventsMaxPerRun)
+	if len(got) != 1 || got[0].App != "metro" {
+		t.Fatalf("симлинк прочитан: %+v", got)
+	}
+}
+
+func TestЖурналСобытийБерётНеБольшеПределаЗаЗапуск(t *testing.T) {
+	dir := t.TempDir()
+	for i := 0; i < 5; i++ {
+		body := eventBody("snakes", "success", fmt.Sprintf("v%d", i))
+		body["id"] = fmt.Sprintf("%064x", i)
+		writeEventFile(t, dir, 1785924102000+int64(i), "snakes", "success", body)
+	}
+	got, cursor := readEvents(dir, 1785924102000, 2)
+	if len(got) != 2 {
+		t.Fatalf("предел на запуск не соблюдён: %d событий", len(got))
+	}
+	// Остаток обязан доехать следующим запуском — за этим курсор и нужен.
+	if cursor != 1785924102001 {
+		t.Fatalf("курсор перескочил неразобранное: %d", cursor)
+	}
+	got, _ = readEvents(dir, cursor, 10)
+	if len(got) != 4 {
+		t.Errorf("остаток журнала потерян: %+v", got)
+	}
+}
+
+func TestОтсутствующийЖурналНеАвария(t *testing.T) {
+	// Агент обязан работать на машине, где deploy-kit ещё не раскладывали.
+	got, cursor := readEvents(filepath.Join(t.TempDir(), "нет"), 42, eventsMaxPerRun)
+	if got != nil || cursor != 42 {
+		t.Errorf("отсутствие каталога сдвинуло курсор или выдумало события: %+v, %d", got, cursor)
+	}
+}
+
+func TestСписокИзмененийСобытияОстаётсяТекстом(t *testing.T) {
+	// releases.json читают бот и страница, и бот признаёт ссылкой пункт,
+	// который выглядит как ссылка на PR. Чужой якорь из события обязан остаться
+	// текстом, а перевод строки — не разрывать пункт пополам.
+	got := cleanEventChangelog([]string{
+		`тема <a href="https://чужой/х">#1</a>`,
+		"первая\nстрока",
+		"‮обратный порядок",
+		"",
+	})
+	if len(got) != 3 {
+		t.Fatalf("пункты потеряны или размножились: %q", got)
+	}
+	if strings.Contains(got[0], "<a") || !strings.Contains(got[0], "#1") {
+		t.Errorf("якорь не снят или номер потерян: %q", got[0])
+	}
+	if got[1] != "первая строка" {
+		t.Errorf("перевод строки не склеен: %q", got[1])
+	}
+	if strings.ContainsRune(got[2], 0x202e) {
+		t.Errorf("переворот направления текста проехал: %q", got[2])
+	}
+}
+
+// ------------------------------------------------------------- карта целей
+
+func TestКартаЦелейВыводитсяИзПутиРелиза(t *testing.T) {
+	cfg := Config{Projects: []Project{{
+		ID: "status",
+		Builds: []Build{
+			{Title: "Агент", Type: "release", Path: "/opt/status-agent/current"},
+			{Title: "Страница", Type: "url", Path: "https://status.samoy.love/version.json", App: "status-site"},
+			// У цели типа url без app связать событие не с чем: адрес ничего
+			// не говорит о том, как называется цель выкатки.
+			{Title: "Безымянная", Type: "url", Path: "https://example.com/version.json"},
+		},
+	}}}
+
+	keys := eventKeys(cfg)
+	if keys["status-agent"] != "status::Агент" {
+		t.Errorf("id цели не выведен из пути релиза: %+v", keys)
+	}
+	if keys["status-site"] != "status::Страница" {
+		t.Errorf("явный app из конфига не сработал: %+v", keys)
+	}
+	if len(keys) != 2 {
+		t.Errorf("в карту попало лишнее: %+v", keys)
+	}
+}
+
+func TestОдинИдНаДвеЦелиСнимаетсяСКарты(t *testing.T) {
+	// Две цели с одним APP затирали бы историю друг друга, и заметить это можно
+	// было бы только по расходящимся спискам изменений.
+	cfg := Config{Projects: []Project{{
+		ID: "status",
+		Builds: []Build{
+			{Title: "Первая", Type: "release", Path: "/opt/status-agent/current"},
+			{Title: "Вторая", Type: "release", Path: "/opt/status-agent/current"},
+		},
+	}}}
+	if keys := eventKeys(cfg); len(keys) != 0 {
+		t.Errorf("неоднозначный id остался в карте: %+v", keys)
+	}
+}
+
+// ------------------------------------------------------- опрос как проверка
+
+func TestВерсияБезСобытияСтановитсяАномалией(t *testing.T) {
+	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	history := []Release{{Version: "v1", Seen: "2026-08-05T11:00:00Z", EventID: strings.Repeat("a", 64)}}
+
+	// Версия, о которой событие было, — обычное состояние.
+	a := newAnomalyTracker(nil)
+	if kind, _ := a.check("status::Сайт", "v1", history, now); kind != "" {
+		t.Errorf("объявленная версия названа аномалией: %q", kind)
+	}
+	if len(a.next) != 0 {
+		t.Errorf("в состоянии осталась запись о нормальной версии: %+v", a.next)
+	}
+
+	// Незнакомая версия сразу тревогой не становится: version.json на проде
+	// меняется раньше, чем выкатка пишет событие об успехе.
+	a = newAnomalyTracker(nil)
+	kind, since := a.check("status::Сайт", "v2", history, now)
+	if kind != "" || since != "" {
+		t.Errorf("тревога поднята в окне выкатки: %q %q", kind, since)
+	}
+	rec, ok := a.next["status::Сайт"]
+	if !ok || rec.Version != "v2" {
+		t.Fatalf("момент первого наблюдения не запомнен: %+v", a.next)
+	}
+
+	// А вот когда версия остаётся необъявленной дольше отведённого, это
+	// аномалия: выкатили мимо пайплайна или событие потерялось.
+	later := now.Add(anomalyGrace + time.Minute)
+	b := newAnomalyTracker(a.next)
+	kind, since = b.check("status::Сайт", "v2", history, later)
+	if kind != anomalyNoEvent {
+		t.Fatalf("аномалия не объявлена: %q", kind)
+	}
+	if since != rec.Since {
+		t.Errorf("отсчёт начат заново: %q вместо %q", since, rec.Since)
+	}
+
+	// Пришло событие об этой версии — аномалия снимается, а запись о ней
+	// уходит из состояния.
+	c := newAnomalyTracker(b.next)
+	history = append([]Release{{
+		Version: "v2", Seen: later.Format(time.RFC3339), EventID: strings.Repeat("f", 64),
+	}}, history...)
+	if kind, _ = c.check("status::Сайт", "v2", history, later); kind != "" {
+		t.Errorf("аномалия осталась после события: %q", kind)
+	}
+	if len(c.next) != 0 {
+		t.Errorf("состояние копит снятые аномалии: %+v", c.next)
+	}
+}
+
+func TestВерсияИзСтарогоФайлаНеАномалия(t *testing.T) {
+	// В день перехода на события история состоит из записей прежней механики —
+	// без id события. Объявив их необъявленными, агент поднял бы тревогу на всём
+	// хозяйстве сразу.
+	old := []Release{{Version: "v1", Seen: "2026-07-01T00:00:00Z"}}
+	a := newAnomalyTracker(nil)
+	if kind, _ := a.check("status::Сайт", "v1", old, time.Now().UTC()); kind != "" {
+		t.Errorf("запись прежней механики названа аномалией: %q", kind)
+	}
+}
+
+func TestБезВерсииАномалииНет(t *testing.T) {
+	// Сервис не отдал version.json: сказать о выкатке нечего, и аномалии тут
+	// нет — есть недоступный version.json, о котором говорят проверки.
+	a := newAnomalyTracker(map[string]Unexplained{"status::Сайт": {Version: "v2", Since: "2026-08-01T00:00:00Z"}})
+	if kind, _ := a.check("status::Сайт", "", nil, time.Now().UTC()); kind != "" {
+		t.Errorf("пустая версия названа аномалией: %q", kind)
+	}
+	if len(a.next) != 0 {
+		t.Errorf("запись без версии осталась в состоянии: %+v", a.next)
 	}
 }
