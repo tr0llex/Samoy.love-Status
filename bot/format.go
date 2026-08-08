@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"html"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -26,7 +27,105 @@ const (
 	unknown  = "⚪️"
 )
 
-func esc(s string) string { return html.EscapeString(s) }
+// esc — чужой текст, годный для parse_mode=HTML.
+//
+// Экранирование здесь не единственная работа: перед ним из строки вырезается
+// то, что текстом не является. Точка одна на весь бот нарочно — стоит завести
+// вторую, и очистка неминуемо разойдётся с экранированием, а разойдясь, начнёт
+// пропускать ровно там, где о ней забыли.
+func esc(s string) string { return html.EscapeString(sanitizeText(s)) }
+
+// bidiRunes — символы, переключающие направление письма, и невидимки рядом с
+// ними.
+//
+// U+202E (RTL override) ничего не печатает, но переворачивает порядок всего,
+// что идёт после него: «gnp.exe‮…» показывается читателю как «…exe.png».
+// Строка в сообщении при этом ровно та, что записана в поле, — расходится
+// только показ, и заметить подмену в чате нечем. Остальные из списка (метки
+// направления, изоляты, ноль-ширинные, BOM и мягкий перенос) не переворачивают
+// текст, но так же невидимы: ими режут слово пополам или клеят два разных
+// адреса в один на вид.
+func bidiRune(r rune) bool {
+	switch {
+	case r == 0x00AD, r == 0x061C, r == 0xFEFF:
+		return true
+	case r >= 0x200B && r <= 0x200F:
+		return true
+	case r >= 0x202A && r <= 0x202E:
+		return true
+	case r >= 0x2066 && r <= 0x2069:
+		return true
+	}
+	return false
+}
+
+// sanitizeText вычищает из чужой строки всё, что не текст.
+//
+// Управляющие символы становятся ПРОБЕЛОМ, а не исчезают: «а\nб» без пробела
+// склеилось бы в «аб». А исчезать они обязаны потому, что перевод строки в поле
+// подделывает строку сообщения — «🔴 <b>Прод</b> недоступен» с новой строки
+// читается как отдельное уведомление от бота, которому владелец доверяет по
+// определению.
+//
+// Переключатели направления письма (bidiRune) удаляются целиком: показать
+// пробел вместо невидимого символа было бы честнее, но он рвал бы слово.
+//
+// Битые байты UTF-8 превращаются в U+FFFD: результат этой функции уезжает в
+// Telegram, а негодную кодировку он отвергает вместе со всем сообщением.
+func sanitizeText(s string) string {
+	if !strings.ContainsFunc(s, dirtyRune) && utf8.ValidString(s) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case bidiRune(r):
+		case r < 0x20, r == 0x7F, r >= 0x80 && r <= 0x9F:
+			b.WriteRune(' ')
+		default:
+			b.WriteRune(r) // невалидный байт уже пришёл сюда как U+FFFD
+		}
+	}
+	return b.String()
+}
+
+func dirtyRune(r rune) bool {
+	return r < 0x20 || r == 0x7F || (r >= 0x80 && r <= 0x9F) || bidiRune(r)
+}
+
+// logSafe — чужая строка, годная для записи в журнал.
+//
+// Отдельно от sanitizeText, потому что задача обратная. В сообщении управляющий
+// символ надо СТЕРЕТЬ, чтобы читатель увидел текст; в журнале его надо
+// ПОКАЗАТЬ, чтобы разбирающий инцидент увидел, что в поле лежала подделка.
+// CRLF в поле события подделывает строку journald: одно поле превращается в
+// две записи, и вторая выглядит как сообщение самого бота.
+//
+// Длина ограничена здесь же: поле приезжает файлом с диска, и его размер бот не
+// выбирал.
+func logSafe(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case r == '\t':
+			b.WriteString(`\t`)
+		case r < 0x20, r == 0x7F, r >= 0x80 && r <= 0x9F, bidiRune(r):
+			fmt.Fprintf(&b, `\u%04x`, r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return cutRunes(b.String(), logFieldMax)
+}
+
+// logFieldMax — сколько символов чужого поля попадает в одну запись журнала.
+const logFieldMax = 200
 
 func fmtTime(t time.Time) string {
 	return t.In(msk).Format("02.01 15:04 MSK")
@@ -520,6 +619,449 @@ func formatEvent(e Event) string {
 	}
 }
 
+// ------------------------------------------------------------ события выкатки
+
+// Deploy — событие выкатки в том виде, в каком его читает форматтер.
+//
+// Тип отдельный от Event, и это не дублирование. Event описывает НАБЛЮДЕНИЕ за
+// продом (упало, поднялось, сменилась версия), а Deploy — то, что выкатка
+// сообщила о себе сама, и в нём есть поля, которых у наблюдения быть не может:
+// стадия провала, причина отката, адрес прогона. Смысл и пределы полей заданы
+// контрактом deploy-kit/docs/events.md и здесь не выдумываются заново.
+//
+// Title и URL приходят НЕ из события, а из реестра summary.json (контракт, §4):
+// имя проекта в хозяйстве одно, и вторая правда о нём развела бы чат и
+// страницу первым же переименованием.
+type Deploy struct {
+	Kind string // success | failure | rolled_back | rollback | started | published
+	App  string // id цели из события; показывается, когда её нет в реестре
+	// Title и URL — человеческое имя цели и адрес, куда идти смотреть.
+	Title   string
+	URL     string
+	Project string
+	// Version у rollback — это релиз, НА который откатились, у остальных видов
+	// — тот, который выкатывали (контракт, §4).
+	Version   string
+	Previous  string
+	Stage     string // только из перечисления контракта, §7
+	Reason    string // только из перечисления контракта, §7
+	CommitURL string
+	RunURL    string
+	Changelog []string
+	At        time.Time
+}
+
+// Виды события. Строками, а не типом Kind: Kind описывает наблюдения бота, и
+// смешивать в нём два разных перечисления — верный способ однажды сравнить
+// «up» с «success».
+const (
+	deploySuccess    = "success"
+	deployFailure    = "failure"
+	deployRolledBack = "rolled_back"
+	deployRollback   = "rollback"
+	deployStarted    = "started"
+	deployPublished  = "published"
+)
+
+const (
+	iconFail = "❌"
+	iconBack = "↩️"
+	iconWait = "⏳"
+	iconPub  = "📦"
+	iconOK   = "✅"
+	iconShip = "🚀"
+)
+
+// Потолки на поля события.
+//
+// Все они повторяют контракт (§8) и держатся здесь ВТОРОЙ раз намеренно.
+// Событие приезжает файлом с диска, и проверить его обязан тот, кто отправляет
+// сообщение: писатель, положивший в поле мегабайт, — это либо ошибка писателя,
+// либо не тот писатель, и в обоих случаях чат не должен этого заметить.
+const (
+	deployTitleMax = 120 // столько же, сколько у темы коммита (CLAUDE.md)
+	deployAppMax   = 64  // столько же, сколько у имени каталога релиза
+	deployVerMax   = 128
+	deployEnumMax  = 24
+	// deployTargets — сколько целей печатается в сообщении прогона. Больше
+	// шести не выкатывает ни один репозиторий хозяйства; двадцать — это уже
+	// защита от вранья, а не формат.
+	deployTargets = 20
+	// deployChangelogMax — пунктов списка изменений в одном событии.
+	//
+	// Контракт разрешает писателю двадцать, здесь стоит сто, и это не
+	// расхождение: БОТ НЕ СТРОЖЕ ТОГО, КТО ПИШЕТ. Двадцать первый пункт,
+	// доехавший до бота, — это повод показать его, а не молча урезать релиз;
+	// сто — тот же потолок против вранья, что стоит у агента.
+	deployChangelogMax = 100
+)
+
+// deployStages — стадии провала по-русски. Ключи — закрытое перечисление
+// контракта (§7).
+//
+// ЭТА КАРТА И ЕСТЬ ЗАЩИТА ОТ УТЕЧКИ. В сообщение попадает не значение поля, а
+// то, что нашлось по нему в карте: сырой вывод лога, путь на сервере или кусок
+// nginx.conf, положенный в stage вместо перечисления, не совпадёт ни с одним
+// ключом и не покажется вовсе. Незнакомая стадия = стадии нет, а событие
+// показывается: терять выкатку из-за неизвестного значения нельзя (контракт, §7).
+var deployStages = map[string]string{
+	"gates":      "проверки до сборки",
+	"preflight":  "сборка и проверка цели",
+	"upload":     "доставка на сервер",
+	"switch":     "переключение релиза",
+	"units":      "службы systemd",
+	"health":     "healthcheck",
+	"version":    "сверка версии на проде",
+	"neighbours": "проверка соседних целей",
+}
+
+// deployReasons — причины отката по-русски. Правило то же, что у deployStages:
+// в чат уезжает значение ИЗ КАРТЫ, а не из поля.
+var deployReasons = map[string]string{
+	"units_failed":      "службы не поднялись",
+	"nginx_failed":      "nginx не принял конфигурацию",
+	"health_failed":     "healthcheck не дождался ответа",
+	"verify_failed":     "проверка verify не прошла",
+	"version_mismatch":  "прод раздаёт не ту версию",
+	"neighbours_failed": "не пережили соседние цели",
+	"manual":            "откат запущен руками",
+}
+
+func stageText(s string) string  { return deployStages[s] }
+func reasonText(s string) string { return deployReasons[s] }
+
+// runURLRe — адрес прогона. Список разрешённого, собранный по тому же правилу,
+// что и commitURLRe: буквальные схема и хост, буквальный путь GitHub Actions,
+// номер прогона цифрами. Всё остальное ссылкой не станет и молча выбросится —
+// «прогон», ведущий не в прогон, хуже отсутствующей ссылки.
+var runURLRe = regexp.MustCompile(
+	`^https://github\.com/[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}/actions/runs/[0-9]{1,20}(/attempts/[0-9]{1,4})?$`)
+
+// runLinkHTML — ссылка «прогон» под сообщением о провале.
+//
+// Ради неё провал и сообщается: подробности провала в чат не едут (контракт,
+// §7), и единственный честный ответ на «а что там случилось» — увести
+// читателя туда, где лог лежит целиком.
+func runLinkHTML(raw string) string {
+	if !runURLRe.MatchString(raw) {
+		return ""
+	}
+	return `<a href="` + esc(raw) + `">прогон</a>`
+}
+
+// sanitizeDeploy приводит чужое событие к тому, что можно показать.
+//
+// Порядок важен: сначала очистка, потом обрезка. Обрезать до очистки значило бы
+// считать в длину невидимые символы, которые всё равно будут выброшены.
+func sanitizeDeploy(d Deploy) Deploy {
+	d.Kind = cutRunes(sanitizeText(d.Kind), deployEnumMax)
+	d.Stage = cutRunes(sanitizeText(d.Stage), deployEnumMax)
+	d.Reason = cutRunes(sanitizeText(d.Reason), deployEnumMax)
+	d.App = cutRunes(sanitizeText(d.App), deployAppMax)
+	d.Project = cutRunes(sanitizeText(d.Project), deployAppMax)
+	d.Title = cutRunes(sanitizeText(d.Title), deployTitleMax)
+	d.Version = cutRunes(sanitizeText(d.Version), deployVerMax)
+	d.Previous = cutRunes(sanitizeText(d.Previous), deployVerMax)
+	// Адреса не режутся, а отбрасываются целиком: обрезанный адрес ведёт не
+	// туда, куда вёл исходный, и это хуже, чем текст без ссылки.
+	if !allowedURL(d.URL) {
+		d.URL = ""
+	}
+	if !commitURLRe.MatchString(d.CommitURL) {
+		d.CommitURL = ""
+	}
+	if !runURLRe.MatchString(d.RunURL) {
+		d.RunURL = ""
+	}
+	d.Changelog = capChangelog(d.Changelog)
+	return d
+}
+
+// capChangelog зажимает число пунктов и говорит вслух, что зажал.
+//
+// Хвост дописывается строкой в том же виде, в каком его печатает
+// deploy-kit/bin/changelog: разбор списка узнаёт его сам и пунктом не считает.
+// Молча оборванный список читается как «больше ничего и не было».
+func capChangelog(lines []string) []string {
+	if len(lines) <= deployChangelogMax {
+		return lines
+	}
+	rest := len(lines) - deployChangelogMax
+	out := append([]string(nil), lines[:deployChangelogMax]...)
+	return append(out, fmt.Sprintf("…и ещё %d %s — список не поместился", rest, pluralCommits(rest)))
+}
+
+// deployName — как называть цель в сообщении. Реестр summary.json главнее, но
+// цели, которой в нём нет, показывается её id из события: видимое расхождение
+// чинится, а тихо пропавшая строка — нет (контракт, §4).
+func deployName(d Deploy) string {
+	if d.Title != "" {
+		return d.Title
+	}
+	return d.App
+}
+
+// formatDeploy — сообщение об ОДНОЙ цели.
+//
+// Успех отдаётся formatEvent без единой правки формы: ленту релизов читают
+// годами, и переписать её заодно с транспортом значило бы сломать единственное,
+// что в этой работе и так работало (контракт, §12).
+//
+// Пустая строка — законный ответ: started служебный и в чат не идёт, а
+// незнакомый вид показывать нечем. Отправитель обязан такое сообщение
+// пропустить, а не слать пустое.
+func formatDeploy(d Deploy) string {
+	d = sanitizeDeploy(d)
+	name := link(deployName(d), d.URL)
+
+	switch d.Kind {
+	case deploySuccess:
+		return formatEvent(Event{
+			Kind: KindRelease, Title: deployName(d), URL: d.URL, Project: d.Project,
+			Version: d.Version, Previous: d.Previous, CommitURL: d.CommitURL,
+			Changelog: d.Changelog, At: d.At,
+		})
+
+	case deployFailure:
+		// Сначала ЧТО не произошло, потом где остановилось, и только потом
+		// адрес прогона: порядок тот же, что у сообщения о падении, — сперва
+		// то, ради чего читают, потом то, куда идти разбираться.
+		s := fmt.Sprintf("%s <b>%s</b> не выкачен", iconFail, name)
+		if d.Version != "" {
+			s += "\n" + versionHTML(d.Version, d.CommitURL)
+		}
+		if st := stageText(d.Stage); st != "" {
+			s += "\nостановились на стадии: " + st
+		}
+		return s + runTail(d)
+
+	case deployRolledBack:
+		s := fmt.Sprintf("%s <b>%s</b> откачен автоматически", iconBack, name)
+		if d.Version != "" {
+			s += "\nне удержался " + versionHTML(d.Version, d.CommitURL)
+		}
+		// Причина точнее стадии и говорит о том же месте («healthcheck не
+		// дождался ответа» вместо «остановились на healthcheck»), поэтому
+		// стадия печатается, только когда причина незнакома.
+		if r := reasonText(d.Reason); r != "" {
+			s += "\nпричина: " + r
+		} else if st := stageText(d.Stage); st != "" {
+			s += "\nостановились на стадии: " + st
+		}
+		return s + runTail(d)
+
+	case deployRollback:
+		s := fmt.Sprintf("%s <b>%s</b> откачен руками", iconBack, name)
+		if d.Version != "" {
+			s += "\nвернули " + versionHTML(d.Version, d.CommitURL)
+		}
+		return s + runTail(d)
+
+	case deployPublished:
+		s := fmt.Sprintf("%s <b>%s</b> — опубликован файл", iconPub, name)
+		if d.Version != "" {
+			s += "\n" + versionHTML(d.Version, d.CommitURL)
+		}
+		return s + runTail(d)
+
+	default:
+		return ""
+	}
+}
+
+// runTail — общий хвост сообщения о выкатке: ссылка на прогон и время.
+func runTail(d Deploy) string {
+	s := ""
+	if r := runLinkHTML(d.RunURL); r != "" {
+		s += "\n" + r
+	}
+	if !d.At.IsZero() {
+		s += "\n<i>" + fmtTime(d.At) + "</i>"
+	}
+	return s
+}
+
+// formatDeployGroup — ОДНО сообщение на прогон.
+//
+// Один пуш катит несколько целей одного репозитория (chillhub — шесть,
+// status.samoy.love — три), и список изменений у них один и тот же: он считается
+// по истории репозитория, а не по цели. Шесть сообщений с одинаковым блоком
+// «Изменения» — это способ перестать читать чат: лента умирает не от одного
+// лишнего сообщения, а от того, что полезное в ней тонет в повторах.
+//
+// Функция вызывается ЗАНОВО на каждое событие группы и рисует сообщение
+// целиком: отправитель первым событием шлёт его, а дальше правит уже
+// отправленное (контракт, §6). Поэтому здесь нет никакого «дописать строку» —
+// есть текущее состояние прогона, собранное из всех его событий.
+//
+// project — заголовок прогона: имя проекта, а не первой попавшейся цели.
+func formatDeployGroup(project string, ds []Deploy) string {
+	targets := deployOutcomes(ds)
+	switch len(targets) {
+	case 0:
+		return ""
+	case 1:
+		// Прогон из одной цели — большинство хозяйства. Он обязан дать РОВНО
+		// прежнюю карточку: ни списка целей, ни следов группировки.
+		return formatDeploy(targets[0])
+	}
+
+	head := esc(sanitizeText(cutRunes(project, deployTitleMax)))
+	if head == "" {
+		head = esc(targets[0].App)
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s <b>%s</b>", iconShip, head)
+	// Версия в шапке — та, которую катят, а не та, на которую откатывают:
+	// прогон называется по тому, что в нём выкатывалось.
+	if v, commit := runVersion(targets); v != "" {
+		b.WriteString(" · " + versionHTML(v, commit))
+	}
+	b.WriteString("\n")
+
+	shown, rest := targets, 0
+	if len(shown) > deployTargets {
+		rest = len(shown) - deployTargets
+		shown = shown[:deployTargets]
+	}
+	for _, t := range shown {
+		fmt.Fprintf(&b, "\n%s %s — %s", outcomeIcon(t), link(deployName(t), t.URL), outcomeText(t))
+	}
+	if rest > 0 {
+		fmt.Fprintf(&b, "\n…и ещё %d %s", rest, pluralTargets(rest))
+	}
+
+	if at := latestAt(targets); !at.IsZero() {
+		b.WriteString("\n\n<i>" + fmtTime(at) + "</i>")
+	}
+	// Список изменений — ОДИН РАЗ на прогон и последним блоком, ровно как в
+	// сообщении об одной цели.
+	if cl := formatChangelog(runChangelog(targets)); cl != "" {
+		b.WriteString("\n\n" + cl)
+	}
+	return b.String()
+}
+
+// deployOutcomes — текущий исход каждой цели прогона.
+//
+// Цель объявляется дважды (started, потом success или failure), и в сообщении
+// ей полагается ОДНА строка. Порядок строк — порядок первого появления цели:
+// он совпадает с порядком выкатки, и строки не прыгают при каждой правке
+// сообщения.
+func deployOutcomes(ds []Deploy) []Deploy {
+	var order []string
+	byApp := map[string]Deploy{}
+	for _, raw := range ds {
+		d := sanitizeDeploy(raw)
+		key := d.App
+		if key == "" {
+			key = d.Title
+		}
+		prev, seen := byApp[key]
+		if !seen {
+			order = append(order, key)
+		}
+		// Исход не откатывается назад в «выкатывается…»: события могут доехать
+		// не по порядку (контракт, §6), и запоздавший started не имеет права
+		// стереть уже объявленный итог.
+		if seen && d.Kind == deployStarted && prev.Kind != deployStarted {
+			continue
+		}
+		byApp[key] = d
+	}
+	out := make([]Deploy, 0, len(order))
+	for _, k := range order {
+		out = append(out, byApp[k])
+	}
+	return out
+}
+
+// outcomeText — исход цели строкой. Род женский: строка про ЦЕЛЬ, а не про
+// сервис («админка откачена»), и в одиночном сообщении, где речь о компоненте,
+// формулировки свои.
+func outcomeText(d Deploy) string {
+	switch d.Kind {
+	case deploySuccess:
+		return "выкачена"
+	case deployStarted:
+		return "выкатывается…"
+	case deployPublished:
+		return "опубликована"
+	case deployFailure:
+		if st := stageText(d.Stage); st != "" {
+			return "провалена на стадии: " + st
+		}
+		return "провалена"
+	case deployRolledBack:
+		if r := reasonText(d.Reason); r != "" {
+			return "откачена — " + r
+		}
+		return "откачена"
+	case deployRollback:
+		if d.Version != "" {
+			return "откачена руками на " + versionHTML(d.Version, d.CommitURL)
+		}
+		return "откачена руками"
+	default:
+		// Незнакомый вид события — не повод потерять строку: пропавшая цель
+		// читается как «её не катили», и это враньё.
+		return "исход неизвестен"
+	}
+}
+
+func outcomeIcon(d Deploy) string {
+	switch d.Kind {
+	case deploySuccess:
+		return iconOK
+	case deployStarted:
+		return iconWait
+	case deployPublished:
+		return iconPub
+	case deployFailure:
+		return iconFail
+	case deployRolledBack, deployRollback:
+		return iconBack
+	default:
+		return unknown
+	}
+}
+
+// runVersion — версия прогона и адрес её коммита.
+//
+// Берётся первая объявленная: коммит у прогона один, значит и версия одна.
+// Событие ручного отката пропускается — его version называет старый релиз.
+func runVersion(ds []Deploy) (version, commitURL string) {
+	for _, d := range ds {
+		if d.Kind == deployRollback || d.Version == "" {
+			continue
+		}
+		return d.Version, d.CommitURL
+	}
+	return "", ""
+}
+
+// runChangelog — список изменений прогона. Тоже первый непустой: он общий для
+// всех целей, и печатать его положено один раз.
+func runChangelog(ds []Deploy) []string {
+	for _, d := range ds {
+		if len(d.Changelog) > 0 {
+			return d.Changelog
+		}
+	}
+	return nil
+}
+
+func latestAt(ds []Deploy) time.Time {
+	var at time.Time
+	for _, d := range ds {
+		if d.At.After(at) {
+			at = d.At
+		}
+	}
+	return at
+}
+
 // ------------------------------------------------------------ список изменений
 
 // Вид блока задан один раз — в deploy-kit/bin/changelog: заголовок
@@ -976,14 +1518,61 @@ func cutBytes(s string, n int) string {
 	return s[:n]
 }
 
+// linkHosts — хосты, на которые боту позволено уводить читателя.
+//
+// СПИСОК РАЗРЕШЁННОГО, А НЕ ЗАПРЕЩЁННОГО. Хозяйство целиком живёт на двух
+// именах, и третьего адреса в сообщении бота взяться неоткуда — а если он
+// всё-таки взялся, значит взялся не оттуда.
+var linkHosts = []string{"samoy.love", "github.com"}
+
+// linkAlphabet — алфавит адреса, попадающего в href.
+//
+// Ни «"», ни «<», ни «>», ни пробела, ни управляющих символов: из атрибута
+// нельзя выйти и нельзя открыть второй тег. Экранирование поверх этого всё
+// равно остаётся, но опираться на него одно нельзя — оно чинит разметку, а не
+// назначение ссылки.
+var linkAlphabet = regexp.MustCompile(`^https://[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]{1,300}$`)
+
+// allowedURL — можно ли вести читателя по этому адресу.
+//
+// Проверяются ТРИ вещи, и каждая закрывает свою дыру:
+//
+//   - схема ровно «https»: «javascript:», «data:» и «http:» ссылкой не станут;
+//   - алфавит адреса: см. linkAlphabet;
+//   - хост из списка, причём разобранный, а не найденный подстрокой.
+//     «https://github.com@evil.example/» ведёт на evil.example, а
+//     «https://github.com.evil.example/» — тем более; обе строки содержат
+//     «github.com» и обе обязаны быть отвергнуты.
+//
+// Зачем вообще: сообщения бота — это то, чему владелец доверяет по
+// определению, и ссылка в них открывается не глядя. Адреса приезжают из
+// summary.json на диске и из события выкатки, то есть из файлов, которые бот не
+// писал; фишинговая ссылка от имени бота стоит дешевле любой другой.
+func allowedURL(raw string) bool {
+	if !linkAlphabet.MatchString(raw) {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.User != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	for _, h := range linkHosts {
+		if host == h || strings.HasSuffix(host, "."+h) {
+			return true
+		}
+	}
+	return false
+}
+
 // link — подпись со ссылкой на сам сервис.
 //
 // Уведомление без ссылки заставляет владельца искать адрес руками ровно в тот
 // момент, когда некогда: увидел «недоступен» — хочешь открыть и посмотреть.
-// Адрес пускаем только http(s): в конфиге он свой, но подставлять в разметку
-// что попало всё равно не стоит.
+// Непрошедший проверку адрес — не повод потерять подпись: она остаётся
+// текстом, ровно как у цели, для которой адрес не настроен вовсе.
 func link(text, url string) string {
-	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+	if !allowedURL(url) {
 		return esc(text)
 	}
 	return fmt.Sprintf(`<a href="%s">%s</a>`, esc(url), esc(text))
