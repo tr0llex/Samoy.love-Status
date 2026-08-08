@@ -16,10 +16,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"os/signal"
+	"path/filepath"
+	"sort"
 	"sync"
 	"syscall"
 	"time"
@@ -89,6 +93,40 @@ func main() {
 		return
 	}
 
+	// Журнал выкаток: приёмник читает каталог, отправитель говорит в чат.
+	//
+	// Два цикла и два курсора, а не один: очередь отправки живёт в памяти, и
+	// убитый бот теряет всё, что принял, но не отправил, — поэтому приём
+	// продолжается с ПОДТВЕРЖДЁННОГО места, а не с прочитанного (контракт, §10).
+	// Разделение даёт и второе: чтение каталога идёт своим темпом и не ждёт
+	// Telegram.
+	//
+	// Замок тот же самый (mu), потому что state.json один. Порядок захвата
+	// всегда «сначала замок отправителя, потом mu»: отсюда правило — методы
+	// outbox не вызываются под mu, иначе получим взаимную блокировку с
+	// отправителем, который под своим замком лезет в состояние.
+	var (
+		inbox  *Inbox
+		sender *outbox
+	)
+	if cfg.EventsDir != "" {
+		inbox = newInbox(cfg.EventsDir)
+		store := &eventStore{st: st, inbox: inbox, groups: loadGroups(cfg.Groups)}
+		sender = newOutbox(tg, cfg.Owner, store, func() error {
+			mu.Lock()
+			defer mu.Unlock()
+			if err := saveState(statePath, st); err != nil {
+				return err
+			}
+			st.dirty = false
+			return saveGroups(cfg.Groups, store.groups)
+		}, metrics, func(v groupView) string { return renderDeployGroup(summaryPath, v) })
+		sender.keyboard = func(v groupView) *Keyboard { return deployKeyboard(summaryPath, v) }
+		sender.log = log.Printf
+	} else {
+		log.Print("журнал выкаток не читается: EVENTS_DIR выключен")
+	}
+
 	var wg sync.WaitGroup
 	wg.Add(2)
 
@@ -111,6 +149,14 @@ func main() {
 			now := time.Now().UTC()
 			mu.Lock()
 			events := st.Apply(s, now, cfg.Remind, cfg.Stale)
+			// Пока живы оба пути, одна выкатка видна дважды: событием (сразу) и
+			// разницей снимков version.json (через минуту-другую). Событие
+			// приходит первым и запоминает версию — наблюдение той же версии
+			// после этого молчит. Обратный порядок (бот лежал, наблюдение
+			// успело первым) даст дубль, и это осознанный размен: снос старого
+			// пути идёт отдельной волной, а до неё лишнее сообщение лучше
+			// пропавшего.
+			events = dropAnnounced(events, now)
 			// Пишем по факту изменения, а не по факту события: часть
 			// изменений Apply делает молча (см. State.dirty). Флаг снимаем
 			// только после удачной записи — иначе одна неудача потеряла бы
@@ -213,6 +259,76 @@ func main() {
 		}
 	}()
 
+	if sender != nil {
+		wg.Add(2)
+
+		// --- цикл чтения журнала выкаток ---
+		go func() {
+			defer wg.Done()
+			ticker := time.NewTicker(cfg.Events)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+				}
+				now := time.Now().UTC()
+				mu.Lock()
+				evs := inbox.Poll(st, now)
+				for _, e := range evs {
+					// Версия помечается объявленной ЗДЕСЬ, при приёме, а не
+					// после отправки: наблюдение тикает раз в 30 секунд и
+					// вполне может опередить лежачий Telegram, а два сообщения
+					// об одном релизе — это ровно то, чего избегаем.
+					rememberAnnouncedLocked(e, now)
+				}
+				if st.dirty {
+					if err := saveState(cfg.State, st); err != nil {
+						log.Printf("состояние не сохранено: %v", err)
+					} else {
+						st.dirty = false
+					}
+				}
+				mu.Unlock()
+
+				if len(evs) == 0 {
+					continue
+				}
+				// Enqueue берёт замок отправителя, поэтому вызывается уже без
+				// mu: порядок захвата в процессе один и обратный ему запрещён.
+				items := make([]outboxItem, 0, len(evs))
+				for _, e := range evs {
+					items = append(items, outboxItemOf(e))
+					log.Printf("событие выкатки: %s %s", logSafe(e.Kind), logSafe(e.App))
+				}
+				sender.Enqueue(items...)
+			}
+		}()
+
+		// --- цикл отправки событий выкатки ---
+		//
+		// Отдельным циклом, потому что у отправки свой темп: отказ Telegram
+		// оставляет событие первым в очереди и назначает паузу, а чтение
+		// журнала в это время обязано продолжаться — иначе журнал встанет
+		// целиком из-за одной недоставленной карточки.
+		go func() {
+			defer wg.Done()
+			ticker := time.NewTicker(cfg.Events)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+				}
+				// Ошибка уже в журнале (sender.log) вместе с номером попытки и
+				// паузой: второй раз о ней писать нечего.
+				_ = sender.Flush(ctx)
+			}
+		}()
+	}
+
 	log.Printf("бот запущен: данные %s, напоминание раз в %s", summaryPath, cfg.Remind)
 	wg.Wait()
 	log.Print("бот остановлен")
@@ -291,4 +407,288 @@ func handleUpdate(ctx context.Context, tg *Telegram, u Update, owner, ownerUser 
 		metrics.sendFailed()
 		log.Printf("ответ на /%s не отправлен: %v", cmd, err)
 	}
+}
+
+// ------------------------------------------- связывание журнала выкаток
+
+// eventStore склеивает две половины состояния в одну.
+//
+// Приёмник держит курсор приёма и недавние id прямо в State (watch.go),
+// отправитель просит от состояния интерфейс outboxStore. Здесь они сходятся:
+// курсор отправки и recentIds — те же самые поля State, и никакой второй их
+// копии в процессе нет. Иначе один и тот же ключ state.json писался бы из двух
+// мест, и какое победит, зависело бы от порядка записи.
+//
+// Всё, что здесь есть, живёт под общим замком mu: под ним же работает приёмник,
+// а Confirmed трогает его внутреннюю память о неподтверждённых id.
+type eventStore struct {
+	st    *State
+	inbox *Inbox
+	// groups — память о сообщениях прогонов. Отдельным файлом, потому что поля
+	// Groups в State нет (см. Config.Groups).
+	groups map[string]*groupRecord
+}
+
+func (s *eventStore) Cursor() string {
+	mu.Lock()
+	defer mu.Unlock()
+	return s.st.OutboxCursor
+}
+
+// Advance двигает курсор вперёд и только вперёд: назад его двигает лишь
+// приёмник на старте, и то свой собственный.
+func (s *eventStore) Advance(file string) {
+	mu.Lock()
+	defer mu.Unlock()
+	if file > s.st.OutboxCursor {
+		s.st.OutboxCursor = file
+		s.st.dirty = true
+	}
+}
+
+func (s *eventStore) Seen(id string) bool {
+	mu.Lock()
+	defer mu.Unlock()
+	_, ok := s.st.RecentIDs[id]
+	return ok
+}
+
+// Remember идёт через Inbox.Confirmed, а не пишет в карту напрямую: приёмник
+// держит ещё и список отданных, но не подтверждённых id, и снимать его обязан
+// тот же вызов, что кладёт id в долгую память.
+func (s *eventStore) Remember(id string, at time.Time) {
+	mu.Lock()
+	defer mu.Unlock()
+	s.inbox.Confirmed(s.st, id, at)
+}
+
+func (s *eventStore) Group(key string) *groupRecord {
+	mu.Lock()
+	defer mu.Unlock()
+	return s.groups[key]
+}
+
+func (s *eventStore) SetGroup(key string, rec *groupRecord) {
+	mu.Lock()
+	defer mu.Unlock()
+	s.groups[key] = rec
+}
+
+// Compact чистит только записи о прогонах: recentIds чистится приёмником и по
+// своему, куда более долгому сроку — 14 суток против шести часов. Сроки разные
+// намеренно: «не показывали ли мы это уже» и «есть ли ещё смысл править то
+// сообщение» — разные вопросы, и ответы на них перестают быть верными в разное
+// время.
+func (s *eventStore) Compact(now time.Time) {
+	mu.Lock()
+	defer mu.Unlock()
+	for g, rec := range s.groups {
+		if rec == nil || now.Sub(rec.At) > outboxGroupTTL {
+			delete(s.groups, g)
+		}
+	}
+	if len(s.groups) <= outboxGroupsMax {
+		return
+	}
+	keys := make([]string, 0, len(s.groups))
+	for g := range s.groups {
+		keys = append(keys, g)
+	}
+	sort.Slice(keys, func(i, j int) bool { return s.groups[keys[i]].At.Before(s.groups[keys[j]].At) })
+	for _, g := range keys[:len(s.groups)-outboxGroupsMax] {
+		delete(s.groups, g)
+	}
+}
+
+// loadGroups читает память о прогонах. Битый или пропавший файл — не авария:
+// потеряв её, бот заведёт новые карточки вместо правки старых. Это хуже, чем
+// правка, но несравнимо лучше молчания.
+func loadGroups(path string) map[string]*groupRecord {
+	out := map[string]*groupRecord{}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return out
+	}
+	if err := json.Unmarshal(b, &out); err != nil {
+		log.Printf("память о прогонах не разобрана (%s): %v", path, err)
+		return map[string]*groupRecord{}
+	}
+	return out
+}
+
+// saveGroups пишет через временный файл и rename — по той же причине, что и
+// saveState: бота могут убить в любой момент, а недочитанный файл означал бы
+// вторую карточку рядом с уже отправленной.
+func saveGroups(path string, groups map[string]*groupRecord) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	b, err := json.Marshal(groups)
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// outboxItemOf — переходник между проверенным событием приёмника и очередью
+// отправителя. Типы у них разные намеренно (граница «проверено» видна в
+// системе типов), и склейка — единственное место, где о них знают оба.
+func outboxItemOf(e DeployEvent) outboxItem {
+	return outboxItem{
+		File: e.File, ID: e.ID,
+		Group: e.Group, GroupSeq: e.GroupSeq,
+		Kind: e.Kind, App: e.App, Source: e.Source, At: e.At,
+		Version: e.Version, Previous: e.Previous, Changelog: e.Changelog,
+		CommitURL: e.CommitURL, RunURL: e.RunURL,
+		Stage: e.Stage, Reason: e.Reason,
+	}
+}
+
+// renderDeployGroup рисует сообщение прогона.
+//
+// Заголовок цели и её адрес берутся из реестра summary.json, а не из события:
+// имя проекта в хозяйстве одно, и вторая правда о нём развела бы чат и
+// страницу первым же переименованием (контракт, §4). Реестр читается на каждое
+// сообщение, а не кэшируется: сообщений о выкатках единицы в день, а вот
+// устаревший в памяти реестр после переименования пришлось бы отлаживать.
+func renderDeployGroup(summaryPath string, v groupView) string {
+	reg := loadRegistry(summaryPath)
+	ds := make([]Deploy, 0, len(v.Targets))
+	for _, t := range v.Targets {
+		d := Deploy{
+			Kind: t.Kind, App: t.App,
+			Version: t.Version, Previous: t.Previous,
+			Stage: t.Stage, Reason: t.Reason,
+			CommitURL: t.CommitURL, RunURL: t.RunURL,
+			At: t.At,
+			// Список изменений у прогона ОДИН, и печатается он один раз; какой
+			// именно цели его отдать, решает форматтер, поэтому он есть у всех.
+			Changelog: v.Changelog,
+		}
+		d.Title, d.URL, d.Project = reg.target(t.App)
+		ds = append(ds, d)
+	}
+	return formatDeployGroup(reg.project(ds), ds)
+}
+
+// deployKeyboard — та же клавиатура, что под уведомлением о падении: «что
+// сейчас» по проекту выкатки и кнопка открыть. Своих кнопок у выкатки нет —
+// откат из бота требует прав на прод и решается отдельно.
+func deployKeyboard(summaryPath string, v groupView) *Keyboard {
+	reg := loadRegistry(summaryPath)
+	for _, t := range v.Targets {
+		if _, _, project := reg.target(t.App); project != "" {
+			return alertKeyboard(project)
+		}
+	}
+	return alertKeyboard("")
+}
+
+// registry — реестр проектов из summary.json: по id цели выкатки даёт
+// человеческое имя, адрес и проект.
+type registry struct {
+	apps     map[string][3]string // app → title, url, project
+	projects map[string]string    // project → заголовок
+}
+
+func loadRegistry(summaryPath string) registry {
+	r := registry{apps: map[string][3]string{}, projects: map[string]string{}}
+	s, err := loadSummary(summaryPath)
+	if err != nil {
+		// Реестра нет — не повод молчать о выкатке: цель покажется своим id и
+		// без ссылки. Это видно и чинится, в отличие от пропавшего сообщения.
+		return r
+	}
+	for _, p := range s.Projects {
+		// Проверки заводятся первыми, проект — последним и поверх: id цели
+		// выкатки чаще совпадает с id проекта, и «Лаунчер» в шапке читается
+		// лучше, чем «Лаунчер · Сайт».
+		for _, c := range p.Checks {
+			r.apps[c.ID] = [3]string{p.Title + " · " + c.Name, firstNonEmptyStr(c.URL, p.URL), p.ID}
+		}
+		r.apps[p.ID] = [3]string{p.Title, p.URL, p.ID}
+		r.projects[p.ID] = p.Title
+	}
+	return r
+}
+
+func (r registry) target(app string) (title, url, project string) {
+	v, ok := r.apps[app]
+	if !ok {
+		return "", "", ""
+	}
+	return v[0], v[1], v[2]
+}
+
+// project — заголовок прогона. Имя проекта, а не первой попавшейся цели: в
+// шапке стоит то, что катилось целиком.
+func (r registry) project(ds []Deploy) string {
+	for _, d := range ds {
+		if t := r.projects[d.Project]; t != "" {
+			return t
+		}
+	}
+	if len(ds) > 0 {
+		return ds[0].App
+	}
+	return ""
+}
+
+// ------------------------------------------- защита от двух голосов на переходе
+
+// announcedTTL — сколько версия считается уже объявленной событием.
+//
+// Шесть часов: наблюдение тикает раз в 30 секунд, и разрыв между событием и
+// первым же обходом измеряется минутами. Запас взят на лежачего агента,
+// который мог не переписать summary.json сразу.
+const announcedTTL = 6 * time.Hour
+
+// announced — версии, о которых уже сказало событие выкатки. Живёт в памяти
+// намеренно: после перезапуска бота старый путь и так молчит — версии в
+// State.Versions к тому моменту записаны.
+//
+// Читается и пишется только под mu.
+var announced = map[string]time.Time{}
+
+// rememberAnnouncedLocked помечает версию события объявленной. Вызывается под
+// mu.
+func rememberAnnouncedLocked(e DeployEvent, now time.Time) {
+	if e.Version == "" {
+		return
+	}
+	switch e.Kind {
+	case evSuccess, evRollback, evRolledBack, evPublished:
+		announced[e.Version] = now
+	}
+	for v, at := range announced {
+		if now.Sub(at) > announcedTTL {
+			delete(announced, v)
+		}
+	}
+}
+
+// dropAnnounced выбрасывает сообщение о релизе, о котором уже сказало событие.
+// Вызывается под mu.
+//
+// Выбрасывается ТОЛЬКО KindRelease: падения и восстановления к выкатке
+// отношения не имеют и глушить их нельзя ни при каких обстоятельствах.
+func dropAnnounced(events []Event, now time.Time) []Event {
+	if len(announced) == 0 {
+		return events
+	}
+	kept := events[:0]
+	for _, e := range events {
+		if e.Kind == KindRelease && e.Version != "" {
+			if at, ok := announced[e.Version]; ok && now.Sub(at) <= announcedTTL {
+				log.Printf("о версии %s уже сказало событие выкатки: наблюдение молчит", logSafe(e.Version))
+				continue
+			}
+		}
+		kept = append(kept, e)
+	}
+	return kept
 }

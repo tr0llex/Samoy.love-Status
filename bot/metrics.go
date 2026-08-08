@@ -52,6 +52,18 @@ type botMetrics struct {
 	pollFailures   float64
 	lastNotifiedAt int64
 	startedAt      int64
+
+	// События выкатки. Три счётчика вместо одного, потому что расходятся они
+	// по разным авариям: «принято, но не отправлено» — лежачий Telegram,
+	// «отброшено» без роста «принято» — заклинивший на дубле журнал.
+	eventsAccepted float64
+	eventsSent     float64
+	eventsDropped  map[string]float64
+	// oldestPendingAt — момент самого старого неотправленного события, 0 —
+	// очередь пуста. Хранится МОМЕНТ, а не возраст: возраст растёт сам по
+	// себе, и посчитанный при записи в очередь он врал бы ровно тогда, когда
+	// нужен, — пока Telegram лежит и никто ничего не пишет.
+	oldestPendingAt int64
 }
 
 func newBotMetrics(path string, now time.Time) *botMetrics {
@@ -62,8 +74,57 @@ func newBotMetrics(path string, now time.Time) *botMetrics {
 		path:          path,
 		notifications: map[string]float64{},
 		commands:      map[string]float64{},
+		eventsDropped: map[string]float64{},
 		startedAt:     now.Unix(),
 	}
+}
+
+// eventAccepted — событие выкатки принято в очередь отправки.
+func (m *botMetrics) eventAccepted() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.eventsAccepted++
+	m.mu.Unlock()
+}
+
+// eventSent — сообщение о событии подтверждено Telegram, курсор сдвинут.
+func (m *botMetrics) eventSent() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.eventsSent++
+	m.mu.Unlock()
+}
+
+// eventDropped — событие снято с очереди без сообщения. Причина меткой: дубль
+// по id — это штатная работа транспорта, а «служебный started» — вообще не
+// повод беспокоиться, и складывать их в одно число значит потерять и то, и
+// другое.
+func (m *botMetrics) eventDropped(reason string) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.eventsDropped[reason]++
+	m.mu.Unlock()
+}
+
+// pendingSince — момент самого старого неотправленного события. Нулевое время
+// означает пустую очередь.
+func (m *botMetrics) pendingSince(at time.Time) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	if at.IsZero() {
+		m.oldestPendingAt = 0
+	} else {
+		m.oldestPendingAt = at.Unix()
+	}
+	m.mu.Unlock()
 }
 
 // notified — уведомление ушло владельцу. kind повторяет вид события
@@ -118,15 +179,36 @@ func (m *botMetrics) render(now time.Time) string {
 	m.mu.Lock()
 	notifications := copyCounts(m.notifications)
 	commands := copyCounts(m.commands)
+	eventsDropped := copyCounts(m.eventsDropped)
 	sendFailures, pollFailures := m.sendFailures, m.pollFailures
 	lastNotifiedAt, startedAt := m.lastNotifiedAt, m.startedAt
+	eventsAccepted, eventsSent := m.eventsAccepted, m.eventsSent
+	oldestPendingAt := m.oldestPendingAt
 	m.mu.Unlock()
+
+	// Возраст считается на месте, от момента записи файла: очередь, стоящая
+	// из-за лежачего Telegram, не порождает ни одного вызова, а показывать
+	// именно её и нужно.
+	pendingAge := float64(0)
+	if oldestPendingAt != 0 {
+		pendingAge = float64(now.Unix() - oldestPendingAt)
+	}
 
 	var b strings.Builder
 	writeFamily(&b, "statusbot_notifications_total",
 		"Отправленные уведомления по виду события", "counter", "kind", notifications)
 	writeFamily(&b, "statusbot_commands_total",
 		"Обработанные команды владельца", "counter", "command", commands)
+
+	writeFamily(&b, "statusbot_deploy_events_dropped_total",
+		"События выкатки, снятые с очереди без сообщения", "counter", "reason", eventsDropped)
+
+	writeSingle(&b, "statusbot_deploy_events_accepted_total",
+		"События выкатки, принятые в очередь отправки", "counter", eventsAccepted)
+	writeSingle(&b, "statusbot_deploy_events_sent_total",
+		"События выкатки, подтверждённые Telegram", "counter", eventsSent)
+	writeSingle(&b, "statusbot_deploy_events_pending_age_seconds",
+		"Возраст самого старого неотправленного события (0 — очередь пуста)", "gauge", pendingAge)
 
 	writeSingle(&b, "statusbot_send_failures_total",
 		"Сообщения, которые Telegram не принял", "counter", sendFailures)
