@@ -200,7 +200,7 @@ func TestЭкранИСообщениеПоказываютОдинСписок(
 		t.Errorf("заголовок генератора уехал на экран:\n%s", text)
 	}
 	// Тот же список в уведомлении о релизе — слово в слово.
-	msg := formatChangelog(lines)
+	msg := formatChangelog(lines, "")
 	for _, want := range []string{"• ускорить расписание", "• починить поиск &amp; фильтр"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("уведомление и экран разошлись на %q:\n%s", want, msg)

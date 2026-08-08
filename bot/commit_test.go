@@ -169,7 +169,7 @@ func TestСоставСообщенияОРелизеЧитаемЦеликом(
 		"<a href=\"" + relCommit + "\">" + relVersion + "</a>\n" +
 		"была <code>release-20260802-090000-def5678</code>\n" +
 		"<i>собрано " + fmtTime(e.At) + "</i>\n\n" +
-		formatChangelog(e.Changelog)
+		formatChangelog(e.Changelog, "")
 
 	if got := formatEvent(e); got != want {
 		t.Errorf("сообщение о релизе изменилось:\nожидали %q\nполучили %q", want, got)

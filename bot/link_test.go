@@ -27,7 +27,7 @@ func TestСсылкаНаPRДоезжаетДоСообщения(t *testing.T) 
 	// и без поблажки ссылка доехала бы до чата текстом «<a href=…>».
 	const subject = "Завести dependabot одинаково во всех репозиториях"
 
-	got := formatChangelog([]string{"<b>Изменения</b>", "• " + subject + " " + prLink})
+	got := formatChangelog([]string{"<b>Изменения</b>", "• " + subject + " " + prLink}, "")
 	if want := "\n• " + subject + " " + prLink; !strings.Contains(got, want) {
 		t.Errorf("ссылка не доехала до сообщения:\nожидали %q\nполучили %s", want, got)
 	}
@@ -67,7 +67,7 @@ func TestБотНеПропускаетЧужуюРазметку(t *testing.T) 
 		"картинка":           `Тема <img src=x onerror=alert(1)>`,
 	}
 	for name, in := range cases {
-		got := formatChangelog([]string{in})
+		got := formatChangelog([]string{in}, "")
 		// Единственная разметка, которой позволено остаться, — своя ссылка.
 		// Всё прочее обязано доехать до чата экранированным текстом.
 		body := strings.TrimPrefix(got, "<b>Изменения</b>")
@@ -87,7 +87,7 @@ func TestЭкранированнаяСсылкаОстаётсяТекстом(
 	// подделка обязана просто доехать текстом — рядом с настоящей ссылкой и не
 	// смешавшись с ней.
 	in := `Тема &lt;a href="https://evil.example/x"&gt;#1&lt;/a&gt; ` + prLink
-	got := formatChangelog([]string{in})
+	got := formatChangelog([]string{in}, "")
 
 	if strings.Contains(got, `<a href="https://evil.example/x">`) {
 		t.Errorf("подделка стала ссылкой:\n%s", got)
@@ -107,7 +107,7 @@ func TestДлинныйАдресНеСъедаетТему(t *testing.T) {
 	// Читатель видит «#21», а не адрес: считать ширину пункта вместе с
 	// невидимым адресом значило бы наказывать тему за длину чужой ссылки.
 	subject := changelogSubject120(t)
-	got := formatChangelog([]string{"• " + subject + " " + prLink})
+	got := formatChangelog([]string{"• " + subject + " " + prLink}, "")
 	if !strings.Contains(got, "• "+subject+" "+prLink) {
 		t.Errorf("тема предельной длины обрезана из-за адреса ссылки:\n%s", got)
 	}
